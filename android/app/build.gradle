@@ -32,23 +32,32 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
+    def keystoreProperties = new Properties()
+    def keystorePropertiesFile = rootProject.file('key.properties')
+    def hasReleaseKeystore = keystorePropertiesFile.exists()
+    if (hasReleaseKeystore) {
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    }
+
     signingConfigs {
         release {
-            def keystoreProperties = new Properties()
-            def keystorePropertiesFile = rootProject.file('key.properties')
-            if (keystorePropertiesFile.exists()) {
-                keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+            if (hasReleaseKeystore) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+                storeType keystoreProperties['storeType'] ?: 'jks'
+                storePassword keystoreProperties['storePassword']
             }
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.release
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.release
+            } else {
+                signingConfig = signingConfigs.debug
+            }
         }
     }
 }
