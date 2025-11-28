@@ -8,6 +8,8 @@ class AnymexDropdown extends StatefulWidget {
   final IconData icon;
   final IconData? actionIcon;
   final VoidCallback? onActionPressed;
+  final bool enableSearch;
+  final String? searchHint;
 
   const AnymexDropdown({
     super.key,
@@ -18,6 +20,8 @@ class AnymexDropdown extends StatefulWidget {
     required this.icon,
     this.actionIcon,
     this.onActionPressed,
+    this.enableSearch = false,
+    this.searchHint,
   });
 
   @override
@@ -33,6 +37,8 @@ class _AnymexDropdownState extends State<AnymexDropdown>
   late Animation<double> _expandAnimation;
   late Animation<double> _fadeAnimation;
   late Animation<double> _rotateAnimation;
+  late TextEditingController _searchController;
+  late ValueNotifier<List<DropdownItem>> _filteredItems;
 
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
@@ -66,14 +72,53 @@ class _AnymexDropdownState extends State<AnymexDropdown>
       parent: _animationController,
       curve: Curves.easeOutCubic,
     ));
+
+    _searchController = TextEditingController();
+    _filteredItems = ValueNotifier<List<DropdownItem>>(widget.items);
+    _searchController.addListener(_handleSearch);
   }
 
   @override
   void dispose() {
     _animationController.dispose();
     _fadeController.dispose();
+    _searchController.removeListener(_handleSearch);
+    _searchController.dispose();
+    _filteredItems.dispose();
     _overlayEntry?.remove();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnymexDropdown oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items != widget.items) {
+      _filteredItems.value = _filterItems(_searchController.text);
+    }
+  }
+
+  List<DropdownItem> _filterItems(String query) {
+    if (query.isEmpty) return widget.items;
+    final lower = query.toLowerCase();
+    return widget.items
+        .where((item) =>
+            item.text.toLowerCase().contains(lower) ||
+            (item.subtitle?.toLowerCase().contains(lower) ?? false))
+        .toList();
+  }
+
+  void _handleSearch() {
+    if (!widget.enableSearch) return;
+    _filteredItems.value = _filterItems(_searchController.text.trim());
+    _overlayEntry?.markNeedsBuild();
+  }
+
+  void _resetSearch() {
+    if (!widget.enableSearch) return;
+    if (_searchController.text.isNotEmpty) {
+      _searchController.clear();
+    }
+    _filteredItems.value = widget.items;
   }
 
   void _toggleDropdown() {
@@ -115,6 +160,10 @@ class _AnymexDropdownState extends State<AnymexDropdown>
       _openUpwards = _shouldOpenUpwards();
     });
 
+    if (widget.enableSearch) {
+      _filteredItems.value = widget.items;
+    }
+
     _animationController.forward();
     _fadeController.forward();
 
@@ -132,6 +181,8 @@ class _AnymexDropdownState extends State<AnymexDropdown>
       _overlayEntry?.remove();
       _overlayEntry = null;
     });
+
+    _resetSearch();
   }
 
   OverlayEntry _createOverlayEntry() {
@@ -189,153 +240,216 @@ class _AnymexDropdownState extends State<AnymexDropdown>
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(20),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              itemCount: widget.items.length,
-                              separatorBuilder: (context, index) => Divider(
-                                height: 1,
-                                thickness: 0.5,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .outline
-                                    .withOpacity(0.1),
-                                indent: 16,
-                                endIndent: 16,
-                              ),
-                              itemBuilder: (context, index) {
-                                final item = widget.items[index];
-                                final isSelected =
-                                    widget.selectedItem?.value == item.value;
-
-                                return Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () {
-                                      widget.onChanged(item);
-                                      _closeDropdown();
-                                    },
-                                    splashColor: Theme.of(context)
-                                        .colorScheme
-                                        .primary
-                                        .withOpacity(0.1),
-                                    highlightColor: Theme.of(context)
-                                        .colorScheme
-                                        .primary
-                                        .withOpacity(0.05),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 20,
-                                        vertical: 16,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: isSelected
-                                            ? Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                                .withOpacity(0.08)
-                                            : null,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          // Leading icon
-                                          if (item.leadingIcon != null) ...[
-                                            Container(
-                                              width: 32,
-                                              height: 32,
-                                              decoration: BoxDecoration(
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .primaryContainer
-                                                    .withOpacity(0.3),
-                                              ),
-                                              child: ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                                child: item.leadingIcon!,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                          ],
-
-                                          // Text content
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  item.text,
-                                                  style: TextStyle(
-                                                    fontSize: 15,
-                                                    fontWeight: isSelected
-                                                        ? FontWeight.w600
-                                                        : FontWeight.w500,
-                                                    color: isSelected
-                                                        ? Theme.of(context)
-                                                            .colorScheme
-                                                            .primary
-                                                        : Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurface,
-                                                  ),
-                                                ),
-                                                if (item.subtitle != null) ...[
-                                                  const SizedBox(height: 2),
-                                                  Text(
-                                                    item.subtitle!,
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w400,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurface
-                                                          .withOpacity(0.6),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ],
-                                            ),
-                                          ),
-
-                                          // Extra widget (if any)
-                                          if (item.extra != null) ...[
-                                            const SizedBox(width: 8),
-                                            item.extra!,
-                                          ],
-
-                                          // Trailing icon or check
-                                          if (item.trailingIcon != null) ...[
-                                            const SizedBox(width: 8),
-                                            item.trailingIcon!,
-                                          ] else if (isSelected) ...[
-                                            const SizedBox(width: 8),
-                                            Container(
-                                              padding: const EdgeInsets.all(4),
-                                              decoration: BoxDecoration(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .primary,
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              child: Icon(
-                                                Icons.check,
-                                                size: 14,
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .onPrimary,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
+                            child: Column(
+                              children: [
+                                if (widget.enableSearch)
+                                  Padding(
+                                    padding: const EdgeInsets.all(12.0),
+                                    child: TextField(
+                                      controller: _searchController,
+                                      decoration: InputDecoration(
+                                        hintText:
+                                            widget.searchHint ?? 'Search...',
+                                        prefixIcon:
+                                            const Icon(Icons.search_rounded),
+                                        isDense: true,
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
                                       ),
                                     ),
                                   ),
-                                );
-                              },
+                                Expanded(
+                                  child: ValueListenableBuilder<
+                                      List<DropdownItem>>(
+                                    valueListenable: _filteredItems,
+                                    builder: (context, filteredItems, _) {
+                                      if (filteredItems.isEmpty) {
+                                        return Center(
+                                          child: Text(
+                                            'No matches found',
+                                            style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface
+                                                  .withOpacity(0.6),
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                      return ListView.separated(
+                                        shrinkWrap: true,
+                                        itemCount: filteredItems.length,
+                                        separatorBuilder: (context, index) =>
+                                            Divider(
+                                          height: 1,
+                                          thickness: 0.5,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .outline
+                                              .withOpacity(0.1),
+                                          indent: 16,
+                                          endIndent: 16,
+                                        ),
+                                        itemBuilder: (context, index) {
+                                          final item = filteredItems[index];
+                                          final isSelected = widget
+                                                  .selectedItem?.value ==
+                                              item.value;
+
+                                          return Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              onTap: () {
+                                                widget.onChanged(item);
+                                                _closeDropdown();
+                                              },
+                                              splashColor: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withOpacity(0.1),
+                                              highlightColor: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withOpacity(0.05),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 20,
+                                                  vertical: 16,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: isSelected
+                                                      ? Theme.of(context)
+                                                          .colorScheme
+                                                          .primary
+                                                          .withOpacity(0.08)
+                                                      : null,
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    if (item.leadingIcon !=
+                                                        null) ...[
+                                                      Container(
+                                                        width: 32,
+                                                        height: 32,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(8),
+                                                          color:
+                                                              Theme.of(context)
+                                                                  .colorScheme
+                                                                  .primaryContainer
+                                                                  .withOpacity(
+                                                                      0.3),
+                                                        ),
+                                                        child: ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(8),
+                                                          child:
+                                                              item.leadingIcon!,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 12),
+                                                    ],
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Text(
+                                                            item.text,
+                                                            style: TextStyle(
+                                                              fontSize: 15,
+                                                              fontWeight:
+                                                                  isSelected
+                                                                      ? FontWeight
+                                                                          .w600
+                                                                      : FontWeight
+                                                                          .w500,
+                                                              color: isSelected
+                                                                  ? Theme.of(
+                                                                          context)
+                                                                      .colorScheme
+                                                                      .primary
+                                                                  : Theme.of(
+                                                                          context)
+                                                                      .colorScheme
+                                                                      .onSurface,
+                                                            ),
+                                                          ),
+                                                          if (item.subtitle !=
+                                                              null) ...[
+                                                            const SizedBox(
+                                                                height: 2),
+                                                            Text(
+                                                              item.subtitle!,
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w400,
+                                                                color: Theme.of(
+                                                                        context)
+                                                                    .colorScheme
+                                                                    .onSurface
+                                                                    .withOpacity(
+                                                                        0.6),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    if (item.extra != null) ...[
+                                                      const SizedBox(width: 8),
+                                                      item.extra!,
+                                                    ],
+                                                    if (item.trailingIcon !=
+                                                        null) ...[
+                                                      const SizedBox(width: 8),
+                                                      item.trailingIcon!,
+                                                    ] else if (isSelected) ...[
+                                                      const SizedBox(width: 8),
+                                                      Container(
+                                                        padding:
+                                                            const EdgeInsets.all(
+                                                                4),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color:
+                                                              Theme.of(context)
+                                                                  .colorScheme
+                                                                  .primary,
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(10),
+                                                        ),
+                                                        child: Icon(
+                                                          Icons.check,
+                                                          size: 14,
+                                                          color:
+                                                              Theme.of(context)
+                                                                  .colorScheme
+                                                                  .onPrimary,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
