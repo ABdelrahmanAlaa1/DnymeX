@@ -1,3 +1,4 @@
+import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/screens/anime/watch/controller/player_controller.dart';
 import 'package:anymex/screens/anime/widgets/episode/normal_episode.dart';
 import 'package:anymex/utils/string_extensions.dart';
@@ -230,15 +231,49 @@ class EpisodesPane extends StatelessWidget {
                       final offlineEpisode = controller.offlineStorage
                           .getAnimeById(controller.anilistData.id)
                           ?.episodes;
+                      final downloadedEntry =
+                          controller.downloadedEntryForEpisode(episode);
 
-                      return BetterEpisode(
-                        episode: episode,
-                        isSelected: isSelected,
-                        onTap: () => controller.changeEpisode(episode),
-                        layoutType: EpisodeLayoutType.detailed,
-                        offlineEpisodes: offlineEpisode,
-                        fallbackImageUrl: controller.anilistData.cover ??
-                            controller.anilistData.poster,
+                      return Stack(
+                        children: [
+                          BetterEpisode(
+                            episode: episode,
+                            isSelected: isSelected,
+                            onTap: () => controller.changeEpisode(episode),
+                            layoutType: EpisodeLayoutType.detailed,
+                            offlineEpisodes: offlineEpisode,
+                            fallbackImageUrl: controller.anilistData.cover ??
+                                controller.anilistData.poster,
+                          ),
+                          if (downloadedEntry != null)
+                            Positioned(
+                              top: 12,
+                              right: 12,
+                              child: Tooltip(
+                                message: 'Play downloaded file',
+                                child: Material(
+                                  color: context.theme.colorScheme.primary
+                                      .withOpacity(0.9),
+                                  shape: const CircleBorder(),
+                                  child: InkWell(
+                                    customBorder: const CircleBorder(),
+                                    onTap: () => controller.changeEpisode(
+                                        episode,
+                                        downloaded: downloadedEntry),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(6.0),
+                                      child: Icon(
+                                        Icons.download_done_rounded,
+                                        size: 16,
+                                        color: context
+                                            .theme.colorScheme.onPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       );
                     },
                   ),
