@@ -689,15 +689,46 @@ class PlayerBottomSheets {
         itemBuilder: (context, index) {
           final episode = episodes[index];
           final isSelected = episode == selectedEpisode.value;
+          final downloadedEntry =
+              controller.downloadedEntryForEpisode(episode);
 
-          return BetterEpisode(
-            episode: episode,
-            isSelected: isSelected,
-            onTap: () => controller.changeEpisode(episode),
-            layoutType: EpisodeLayoutType.compact,
-            offlineEpisodes: offlineEpisode,
-            fallbackImageUrl:
-                controller.anilistData.cover ?? controller.anilistData.poster,
+          return Stack(
+            children: [
+              BetterEpisode(
+                episode: episode,
+                isSelected: isSelected,
+                onTap: () => controller.changeEpisode(episode),
+                layoutType: EpisodeLayoutType.compact,
+                offlineEpisodes: offlineEpisode,
+                fallbackImageUrl: controller.anilistData.cover ??
+                    controller.anilistData.poster,
+              ),
+              if (downloadedEntry != null)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Tooltip(
+                    message: 'Play downloaded file',
+                    child: Material(
+                      color: Get.theme.colorScheme.primary.withOpacity(0.9),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => controller.changeEpisode(episode,
+                            downloaded: downloadedEntry),
+                        child: Padding(
+                          padding: const EdgeInsets.all(5.0),
+                          child: Icon(
+                            Icons.download_done_rounded,
+                            size: 16,
+                            color: Get.theme.colorScheme.onPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           );
         },
       ),
