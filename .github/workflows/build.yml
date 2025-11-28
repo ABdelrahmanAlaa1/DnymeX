@@ -80,10 +80,6 @@ jobs:
       
       - name: Setup Android
         if: matrix.platform == 'android'
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           if [ ! -d "$HOME/cmake/cmake-3.18.1-Linux-x86_64" ]; then
             mkdir -p $HOME/cmake && cd $HOME/cmake
@@ -94,13 +90,6 @@ jobs:
           CMAKE_DIR="$HOME/cmake/cmake-3.18.1-Linux-x86_64"
           echo "cmake.dir=$CMAKE_DIR" >> android/local.properties
           mkdir -p android/app
-          echo "$KEYSTORE_BASE64" | base64 -d > android/app/anymex.jks
-          cat > android/key.properties << EOF
-          storePassword=$KEYSTORE_PASSWORD
-          keyPassword=$KEYSTORE_PASSWORD
-          keyAlias=$KEY_ALIAS
-          storeFile=anymex.jks
-          EOF
       
       - name: Setup Linux
         if: matrix.platform == 'linux'
