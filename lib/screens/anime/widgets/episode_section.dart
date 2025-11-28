@@ -1,6 +1,7 @@
 // ignore_for_file: invalid_use_of_protected_member
 
 import 'dart:async';
+import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/controllers/settings/settings.dart';
 import 'package:anymex/screens/extensions/ExtensionSettings/ExtensionSettings.dart';
 import 'package:anymex/utils/function.dart';
@@ -56,13 +57,70 @@ class _EpisodeSectionState extends State<EpisodeSection> {
   final RxInt _requestCounter = 0.obs;
   final Rx<Future<List<Episode>>?> _episodeFuture =
       Rx<Future<List<Episode>>?>(null);
+  late final DownloadController _downloadController;
+  final RxBool _usingDownloadedSource = false.obs;
+
+  Media? get _currentMedia =>
+      widget.anilistData is Media ? widget.anilistData as Media : null;
 
   @override
   void initState() {
     super.initState();
+    _downloadController = Get.find<DownloadController>();
     if (widget.episodeList != null && widget.episodeList!.isNotEmpty) {
       _episodeFuture.value = Future.value(widget.episodeList!);
     }
+    if (_currentMedia != null) {
+      _downloadController.refreshEpisodeCache(_currentMedia!.id);
+    }
+    _restoreStoredSource();
+  }
+
+  @override
+  void didUpdateWidget(covariant EpisodeSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldMedia =
+        oldWidget.anilistData is Media ? oldWidget.anilistData as Media : null;
+    final newMedia = _currentMedia;
+    if (newMedia == null) return;
+
+    final hasChanged = oldMedia == null ||
+        oldMedia.id != newMedia.id ||
+        oldMedia.serviceType != newMedia.serviceType;
+
+    if (hasChanged) {
+      _restoreStoredSource();
+    }
+  }
+
+  void _restoreStoredSource() {
+    final media = _currentMedia;
+    if (media == null) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_usingDownloadedSource.value) return;
+      sourceController.applyStoredSourceSelection(
+        type: ItemType.anime,
+        media: media,
+      );
+    });
+  }
+
+  void _setDownloadedMode(bool value) {
+    _usingDownloadedSource.value = value;
+    if (value) {
+      _fetchDownloadedEpisodes();
+    } else {
+      widget.episodeList?.value = [];
+    }
+  }
+
+  Future<void> _fetchDownloadedEpisodes() async {
+    final media = _currentMedia;
+    if (media == null) return;
+    await _downloadController.refreshEpisodeCache(media.id);
+    final downloaded = _downloadController.buildEpisodeModels(media);
+    widget.episodeList?.value = downloaded;
   }
 
   Future<List<Episode>> _fetchEpisodes(int requestId) async {
@@ -85,12 +143,30 @@ class _EpisodeSectionState extends State<EpisodeSection> {
   void handleSourceChange(String? value) {
     if (value == null) return;
 
+    if (value == DownloadController.downloadedSourceValue) {
+      _setDownloadedMode(true);
+      return;
+    }
+
+    _setDownloadedMode(false);
+
     widget.episodeError.value = false;
     widget.episodeList?.value = [];
 
     try {
-      final sourceController = Get.find<ServiceHandler>().extensionService;
-      sourceController.getExtensionByName(value);
+      final extensionService = Get.find<ServiceHandler>().extensionService;
+    final selectedSource = extensionService.installedExtensions
+      .firstWhereOrNull((source) =>
+        source.id?.toString() == value || source.name == value);
+
+      final media = _currentMedia;
+      if (media != null && selectedSource != null) {
+        extensionService.rememberSourceSelectionForMedia(
+          type: ItemType.anime,
+          media: media,
+          source: selectedSource,
+        );
+      }
 
       _requestCounter.value++;
       int currentRequestId = _requestCounter.value;
@@ -111,24 +187,24 @@ class _EpisodeSectionState extends State<EpisodeSection> {
   }
 
   Widget buildSourceDropdown() {
-    List<DropdownItem> items = sourceController.installedExtensions.isEmpty
-        ? [
-            const DropdownItem(
-              value: "No Sources Installed",
-              text: "No Sources Available",
-              subtitle: "Install extensions to get started",
-              leadingIcon: Icon(
-                Icons.extension_off,
-                size: 24,
-                color: Colors.grey,
-              ),
-            ),
-          ]
-        : sourceController.installedExtensions.map<DropdownItem>((source) {
+    final downloadedItem = DropdownItem(
+      value: DownloadController.downloadedSourceValue,
+      text: DownloadController.downloadedSourceLabel.toUpperCase(),
+      subtitle: 'Offline Library',
+      leadingIcon: Icon(
+        Icons.download_done_rounded,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+    );
+
+    List<DropdownItem> sourceItems =
+        sourceController.installedExtensions.isEmpty
+            ? []
+            : sourceController.installedExtensions.map<DropdownItem>((source) {
             final isMangayomi = source.extensionType == ExtensionType.mangayomi;
 
             return DropdownItem(
-              value: '${source.name} (${source.lang?.toUpperCase()})',
+              value: source.id?.toString() ?? source.name ?? 'unknown',
               text: source.name?.toUpperCase() ?? 'Unknown Source',
               subtitle: source.lang?.toUpperCase() ?? 'Unknown',
               leadingIcon: NetworkSizedImage(
@@ -142,9 +218,11 @@ class _EpisodeSectionState extends State<EpisodeSection> {
             );
           }).toList();
 
+    List<DropdownItem> items = [downloadedItem, ...sourceItems];
+
     DropdownItem? selectedItem;
-    if (sourceController.installedExtensions.isEmpty) {
-      selectedItem = items.first;
+    if (_usingDownloadedSource.value) {
+      selectedItem = downloadedItem;
     } else {
       final activeSource = sourceController.activeSource.value;
       if (activeSource != null) {
@@ -152,7 +230,7 @@ class _EpisodeSectionState extends State<EpisodeSection> {
             activeSource.extensionType == ExtensionType.mangayomi;
 
         selectedItem = DropdownItem(
-          value: '${activeSource.name} (${activeSource.lang?.toUpperCase()})',
+          value: activeSource.id?.toString() ?? activeSource.name ?? 'unknown',
           text: activeSource.name?.toUpperCase() ?? 'Unknown Source',
           subtitle: activeSource.lang?.toUpperCase() ?? 'Unknown',
           leadingIcon: NetworkSizedImage(
@@ -175,17 +253,43 @@ class _EpisodeSectionState extends State<EpisodeSection> {
       onChanged: (DropdownItem item) => handleSourceChange(item.value),
       actionIcon: Icons.settings_outlined,
       onActionPressed: () => openSourcePreferences(context),
+      enableSearch: true,
+      searchHint: 'Search sources...',
     );
   }
 
   Widget buildEpisodeContent() {
     final sourceController = Get.find<ServiceHandler>().extensionService;
 
-    if (sourceController.activeSource.value == null) {
-      return const NoSourceSelectedWidget();
-    }
-
     return Obx(() {
+      if (_usingDownloadedSource.value) {
+        final downloads = widget.episodeList?.value ?? [];
+        if (downloads.isEmpty) {
+          return SizedBox(
+            height: 300,
+            child: Center(
+              child: AnymexText(
+                text: 'No downloaded episodes yet.',
+                size: 16,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+              ),
+            ),
+          );
+        }
+        return EpisodeListBuilder(
+          episodeList: downloads,
+          anilistData: widget.anilistData,
+          showingDownloaded: true,
+          downloadedEntries:
+              _downloadController.episodeCache[_currentMedia?.id ?? ''] ??
+                  const <DownloadedEpisode>[],
+        );
+      }
+
+      if (sourceController.activeSource.value == null) {
+        return const NoSourceSelectedWidget();
+      }
+
       return FutureBuilder<List<Episode>>(
         future: _episodeFuture.value,
         builder: (context, snapshot) {
@@ -224,6 +328,9 @@ class _EpisodeSectionState extends State<EpisodeSection> {
           return EpisodeListBuilder(
             episodeList: snapshot.data ?? widget.episodeList?.value ?? [],
             anilistData: widget.anilistData,
+            downloadedEntries:
+                _downloadController.episodeCache[_currentMedia?.id ?? ''] ??
+                    const <DownloadedEpisode>[],
           );
         },
       );
