@@ -1,3 +1,4 @@
+import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/controllers/service_handler/service_handler.dart';
 import 'package:anymex/controllers/offline/offline_storage_controller.dart';
 import 'package:anymex/controllers/settings/methods.dart';
@@ -10,6 +11,7 @@ import 'package:anymex/screens/manga/reading_page.dart';
 import 'package:anymex/screens/manga/widgets/chapter_ranges.dart';
 import 'package:anymex/screens/manga/widgets/scanlators_ranges.dart';
 import 'package:anymex/screens/manga/widgets/track_dialog.dart';
+import 'package:anymex/screens/manga/widgets/downloaded_reader_page.dart';
 import 'package:anymex/utils/function.dart';
 import 'package:anymex/utils/string_extensions.dart';
 import 'package:anymex/widgets/common/glow.dart';
@@ -179,11 +181,15 @@ class ChapterService {
 class ChapterListBuilder extends StatefulWidget {
   final List<Chapter>? chapters;
   final Media anilistData;
+  final bool showingDownloaded;
+  final List<DownloadedChapter> downloadedEntries;
 
   const ChapterListBuilder({
     super.key,
     required this.chapters,
     required this.anilistData,
+    this.showingDownloaded = false,
+    this.downloadedEntries = const [],
   });
 
   @override
@@ -194,6 +200,7 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
   final _selectedChunkIndex = 1.obs;
   final _selectedScanIndex = 0.obs;
   final _chapterService = ChapterService();
+  late final DownloadController _downloadController;
 
   final _isInitialized = false.obs;
 
@@ -203,6 +210,7 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
   @override
   void initState() {
     super.initState();
+    _downloadController = Get.find<DownloadController>();
     _auth = Get.find<ServiceHandler>();
     _offlineStorage = Get.find<OfflineStorageController>();
     _initializeChapterState();
@@ -287,6 +295,10 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
       chapterState.scanlators,
       _selectedScanIndex.value,
     );
+    final downloadedMap = {
+      for (final entry in widget.downloadedEntries)
+        entry.chapterNumber: entry,
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -294,7 +306,12 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
         _buildContinueButton(filteredFullChapters, chapterState),
         _buildScanlatorsFilter(chapterState),
         _buildChapterRanges(chapterState),
-        _buildChapterGrid(selectedChapters, filteredFullChapters, chapterState),
+        _buildChapterGrid(
+          selectedChapters,
+          filteredFullChapters,
+          chapterState,
+          downloadedMap,
+        ),
       ],
     );
   }
@@ -353,8 +370,12 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
     );
   }
 
-  Widget _buildChapterGrid(List<Chapter> filteredChapters,
-      List<Chapter> filteredFullChapters, ChapterState chapterState) {
+  Widget _buildChapterGrid(
+    List<Chapter> filteredChapters,
+    List<Chapter> filteredFullChapters,
+    ChapterState chapterState,
+    Map<double, DownloadedChapter> downloadedMap,
+  ) {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -377,20 +398,54 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
         filteredChapters[index],
         filteredFullChapters,
         chapterState,
+        downloadedMap,
       ),
     );
   }
 
-  Widget _buildChapterItem(Chapter chapter, List<Chapter> filteredFullChapters,
-      ChapterState chapterState) {
+  Widget _buildChapterItem(
+    Chapter chapter,
+    List<Chapter> filteredFullChapters,
+    ChapterState chapterState,
+    Map<double, DownloadedChapter> downloadedMap,
+  ) {
+    final downloadEntry = downloadedMap[chapter.number ?? 0];
+    final isDownloaded = downloadEntry != null;
+    final isDownloading = _downloadController.isChapterDownloading(
+      widget.anilistData.id,
+      chapter.number,
+    );
+
+    void handleTap() {
+      if (widget.showingDownloaded && downloadEntry != null) {
+        _openDownloadedChapter(downloadEntry);
+      } else {
+        _chapterService.navigateToReading(
+            widget.anilistData, filteredFullChapters, chapter, context);
+      }
+    }
+
     return ChapterListItem(
       chapter: chapter,
       anilistData: widget.anilistData,
       readChapter: chapterState.readChapter,
       continueChapter: chapterState.continueChapter,
-      onTap: () => _chapterService.navigateToReading(
-          widget.anilistData, filteredFullChapters, chapter, context),
+      onTap: handleTap,
+      isDownloaded: isDownloaded,
+      isDownloading: isDownloading,
+      showingDownloaded: widget.showingDownloaded,
+      onDownloadTap: () => _downloadController.downloadChapter(
+        media: widget.anilistData,
+        chapter: chapter,
+      ),
     );
+  }
+
+  void _openDownloadedChapter(DownloadedChapter chapter) {
+    navigate(() => DownloadedReaderPage(
+          media: widget.anilistData,
+          chapter: chapter,
+        ));
   }
 }
 
@@ -400,6 +455,10 @@ class ChapterListItem extends StatelessWidget {
   final Chapter? readChapter;
   final Chapter? continueChapter;
   final VoidCallback onTap;
+  final VoidCallback? onDownloadTap;
+  final bool isDownloaded;
+  final bool isDownloading;
+  final bool showingDownloaded;
 
   const ChapterListItem({
     super.key,
@@ -408,6 +467,10 @@ class ChapterListItem extends StatelessWidget {
     this.readChapter,
     this.continueChapter,
     required this.onTap,
+    this.onDownloadTap,
+    this.isDownloaded = false,
+    this.isDownloading = false,
+    this.showingDownloaded = false,
   });
 
   @override
@@ -441,7 +504,7 @@ class ChapterListItem extends StatelessWidget {
               const SizedBox(width: 15),
               _buildChapterInfo(context, savedChaps),
               const Spacer(),
-              _buildReadButton(context),
+              _buildActionButtons(context),
             ],
           ),
         ),
@@ -551,22 +614,119 @@ class ChapterListItem extends StatelessWidget {
     );
   }
 
-  Widget _buildReadButton(BuildContext context) {
+  Widget _buildActionButtons(BuildContext context) {
+    if (showingDownloaded && isDownloaded) {
+      return _primaryButton(
+        context,
+        label: 'Open',
+        icon: Icons.folder_open,
+        onPressed: onTap,
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _primaryButton(
+          context,
+          label: 'Read',
+          icon: Icons.menu_book_rounded,
+          onPressed: onTap,
+        ),
+        const SizedBox(width: 8),
+        _downloadButton(context),
+      ],
+    );
+  }
+
+  Widget _primaryButton(BuildContext context,
+      {required String label,
+      required IconData icon,
+      required VoidCallback onPressed}) {
     return Container(
       decoration: BoxDecoration(boxShadow: [glowingShadow(context)]),
       child: AnymexButton(
-        onTap: onTap,
+        onTap: onPressed,
         radius: 12,
-        width: 100,
+        width: 110,
         height: 40,
         color: Theme.of(context).colorScheme.primary,
-        child: AnymexText(
-          text: "Read",
-          variant: TextVariant.semiBold,
-          color: Theme.of(context).colorScheme.onPrimary,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: Theme.of(context).colorScheme.onPrimary,
+              size: 18,
+            ),
+            const SizedBox(width: 6),
+            AnymexText(
+              text: label,
+              variant: TextVariant.semiBold,
+              color: Theme.of(context).colorScheme.onPrimary,
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  Widget _downloadButton(BuildContext context) {
+    if (isDownloaded) {
+      return _iconBadge(
+        context,
+        icon: Icons.check_circle,
+        color: Theme.of(context).colorScheme.secondary,
+        tooltip: 'Saved offline',
+        onPressed: onDownloadTap ?? onTap,
+      );
+    }
+
+    if (isDownloading) {
+      return SizedBox(
+        width: 36,
+        height: 36,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.5,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      );
+    }
+
+    return _iconBadge(
+      context,
+      icon: Icons.download_rounded,
+      color: Theme.of(context).colorScheme.primary,
+      tooltip: 'Download chapter',
+      onPressed: onDownloadTap,
+    );
+  }
+
+  Widget _iconBadge(BuildContext context,
+      {required IconData icon,
+      required Color color,
+      VoidCallback? onPressed,
+      String? tooltip}) {
+    final button = Material(
+      color: color.withOpacity(0.12),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Icon(
+            icon,
+            color: color,
+          ),
+        ),
+      ),
+    );
+
+    if (tooltip != null) {
+      return Tooltip(message: tooltip, child: button);
+    }
+    return button;
   }
 }
 
