@@ -313,6 +313,57 @@ class SourceController extends GetxController implements BaseService {
     }
   }
 
+  Box<dynamic>? _getPreferenceBox() {
+    if (!Hive.isBoxOpen('preferences')) return null;
+    return Hive.box<dynamic>('preferences');
+  }
+
+  String _mediaSourceKey({
+    required ItemType type,
+    required Media media,
+  }) {
+    final service = media.serviceType.name;
+    return 'source_selection_${type.name}_${service}_${media.id}';
+  }
+
+  void rememberSourceSelectionForMedia({
+    required ItemType type,
+    required Media media,
+    required Source source,
+  }) {
+    final prefs = _getPreferenceBox();
+    final sourceId = source.id?.toString();
+    if (prefs == null || sourceId == null || sourceId.isEmpty) return;
+
+    prefs.put(_mediaSourceKey(type: type, media: media), sourceId);
+  }
+
+  Source? applyStoredSourceSelection({
+    required ItemType type,
+    required Media media,
+  }) {
+    final prefs = _getPreferenceBox();
+    if (prefs == null) return null;
+
+    final key = _mediaSourceKey(type: type, media: media);
+    final savedId = prefs.get(key)?.toString();
+
+    if (savedId == null || savedId.isEmpty) {
+      return null;
+    }
+
+    final source = getInstalledExtensions(type)
+        .firstWhereOrNull((s) => s.id.toString() == savedId);
+
+    if (source != null) {
+      setActiveSource(source);
+      return source;
+    }
+
+    prefs.delete(key);
+    return null;
+  }
+
   List<Source> getInstalledExtensions(ItemType type) {
     switch (type) {
       case ItemType.anime:
@@ -322,6 +373,46 @@ class SourceController extends GetxController implements BaseService {
       case ItemType.novel:
         return installedNovelExtensions;
     }
+  }
+
+  Source? getActiveSourceForType(ItemType type) {
+    switch (type) {
+      case ItemType.anime:
+        return activeSource.value;
+      case ItemType.manga:
+        return activeMangaSource.value;
+      case ItemType.novel:
+        return activeNovelSource.value;
+    }
+  }
+
+  void _setActiveSourceForType(ItemType type, Source source) {
+    switch (type) {
+      case ItemType.anime:
+        activeSource.value = source;
+        Hive.box('themeData').put('activeSourceId', source.id);
+        break;
+      case ItemType.manga:
+        activeMangaSource.value = source;
+        Hive.box('themeData').put('activeMangaSourceId', source.id);
+        break;
+      case ItemType.novel:
+        activeNovelSource.value = source;
+        Hive.box('themeData').put('activeNovelSourceId', source.id);
+        break;
+    }
+  }
+
+  Source? cycleToNextSource(ItemType type) {
+    final sources = getInstalledExtensions(type);
+    if (sources.isEmpty) return null;
+
+    final current = getActiveSourceForType(type);
+    final currentIndex = current != null ? sources.indexOf(current) : -1;
+    final nextIndex = (currentIndex + 1) % sources.length;
+    final nextSource = sources[nextIndex];
+    _setActiveSourceForType(type, nextSource);
+    return nextSource;
   }
 
   List<Source> getAvailableExtensions(ItemType type) {
