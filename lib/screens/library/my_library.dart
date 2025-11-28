@@ -1,3 +1,4 @@
+import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/controllers/offline/offline_storage_controller.dart';
 import 'package:anymex/controllers/service_handler/service_handler.dart';
 import 'package:anymex/controllers/settings/settings.dart';
@@ -35,6 +36,438 @@ enum SortType {
   lastAdded,
   lastRead,
   rating,
+}
+
+class DownloadsHubSection extends StatefulWidget {
+  const DownloadsHubSection({super.key});
+
+  @override
+  State<DownloadsHubSection> createState() => _DownloadsHubSectionState();
+}
+
+class _DownloadsHubSectionState extends State<DownloadsHubSection> {
+  final DownloadController _downloadController = Get.find<DownloadController>();
+  late Future<_DownloadsHubData> _downloadsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _downloadsFuture = _loadDownloads();
+  }
+
+  Future<_DownloadsHubData> _loadDownloads() async {
+    final episodes = await _downloadController.listAllDownloadedEpisodes();
+    final chapters = await _downloadController.listAllDownloadedChapters();
+    return _DownloadsHubData(episodes: episodes, chapters: chapters);
+  }
+
+  void _refresh() {
+    setState(() {
+      _downloadsFuture = _loadDownloads();
+    });
+  }
+
+  Future<void> _deleteEpisode(DownloadedEpisode episode) async {
+    await _downloadController.deleteDownloadedEpisode(episode);
+    _refresh();
+  }
+
+  Future<void> _deleteChapter(DownloadedChapter chapter) async {
+    await _downloadController.deleteDownloadedChapter(chapter);
+    _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_DownloadsHubData>(
+      future: _downloadsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _buildLoadingCard(context);
+        }
+
+        if (snapshot.hasError) {
+          return _buildErrorCard(context);
+        }
+
+        final data = snapshot.data!;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _DownloadsSummaryCard<DownloadedEpisode>(
+              title: 'Anime Downloads',
+              totalSizeBytes: data.totalEpisodeBytes,
+              itemCount: data.episodes.length,
+              groups: _groupEpisodes(data.episodes),
+              onDeleteEpisode: _deleteEpisode,
+              onDeleteChapter: _deleteChapter,
+              onRefresh: _refresh,
+            ),
+            const SizedBox(height: 12),
+            _DownloadsSummaryCard<DownloadedChapter>(
+              title: 'Manga Downloads',
+              totalSizeBytes: data.totalChapterBytes,
+              itemCount: data.chapters.length,
+              groups: _groupChapters(data.chapters),
+              onDeleteEpisode: _deleteEpisode,
+              onDeleteChapter: _deleteChapter,
+              onRefresh: _refresh,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildLoadingCard(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Scanning downloads…',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorCard(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline,
+                color: Theme.of(context).colorScheme.error),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Could not load downloads right now.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            TextButton(
+              onPressed: _refresh,
+              child: const Text('Retry'),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<_EpisodeDownloadGroup> _groupEpisodes(List<DownloadedEpisode> entries) {
+    final grouped = <String, _EpisodeDownloadGroup>{};
+    for (final entry in entries) {
+      grouped.putIfAbsent(
+          entry.mediaId,
+          () => _EpisodeDownloadGroup(
+                mediaId: entry.mediaId,
+                mediaTitle: entry.mediaTitle ?? 'Unknown Title',
+              ));
+      grouped[entry.mediaId]!.add(entry);
+    }
+    final result = grouped.values.toList()
+      ..sort((a, b) => a.mediaTitle.compareTo(b.mediaTitle));
+    return result;
+  }
+
+  List<_ChapterDownloadGroup> _groupChapters(List<DownloadedChapter> entries) {
+    final grouped = <String, _ChapterDownloadGroup>{};
+    for (final entry in entries) {
+      grouped.putIfAbsent(
+          entry.mediaId,
+          () => _ChapterDownloadGroup(
+                mediaId: entry.mediaId,
+                mediaTitle: entry.mediaTitle ?? 'Unknown Title',
+              ));
+      grouped[entry.mediaId]!.add(entry);
+    }
+    final result = grouped.values.toList()
+      ..sort((a, b) => a.mediaTitle.compareTo(b.mediaTitle));
+    return result;
+  }
+}
+
+class _DownloadsSummaryCard<T> extends StatelessWidget {
+  const _DownloadsSummaryCard({
+    required this.title,
+    required this.totalSizeBytes,
+    required this.itemCount,
+    required this.groups,
+    required this.onRefresh,
+    required this.onDeleteEpisode,
+    required this.onDeleteChapter,
+  });
+
+  final String title;
+  final int totalSizeBytes;
+  final int itemCount;
+  final List<dynamic> groups;
+  final VoidCallback onRefresh;
+  final Future<void> Function(DownloadedEpisode) onDeleteEpisode;
+  final Future<void> Function(DownloadedChapter) onDeleteChapter;
+
+  String get _summaryLabel {
+    final buffer = StringBuffer();
+    buffer.write('$itemCount item${itemCount == 1 ? '' : 's'}');
+    buffer.write(' · ');
+    buffer.write(_formatBytes(totalSizeBytes));
+    return buffer.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(18.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _summaryLabel,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh downloads',
+                  onPressed: onRefresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (itemCount == 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'No downloads yet. Start saving episodes or chapters for offline access.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: Theme.of(context).hintColor),
+                ),
+              )
+            else
+              Column(
+                children: groups.map((group) {
+                  if (group is _EpisodeDownloadGroup) {
+                    return _EpisodeGroupTile(
+                      group: group,
+                      onDelete: onDeleteEpisode,
+                    );
+                  }
+                  if (group is _ChapterDownloadGroup) {
+                    return _ChapterGroupTile(
+                      group: group,
+                      onDelete: onDeleteChapter,
+                    );
+                  }
+                  return const SizedBox.shrink();
+                }).toList(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EpisodeGroupTile extends StatelessWidget {
+  const _EpisodeGroupTile({
+    required this.group,
+    required this.onDelete,
+  });
+
+  final _EpisodeDownloadGroup group;
+  final Future<void> Function(DownloadedEpisode) onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      title: Text(group.mediaTitle,
+          style: Theme.of(context).textTheme.bodyLarge),
+      subtitle: Text(
+        '${group.entries.length} episode${group.entries.length == 1 ? '' : 's'} · ${_formatBytes(group.totalSizeBytes)}',
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: Theme.of(context).hintColor),
+      ),
+      children: group.entries.map((entry) {
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text('Episode ${entry.episodeNumber}'),
+          subtitle: entry.title?.isNotEmpty == true
+              ? Text(entry.title!, maxLines: 1, overflow: TextOverflow.ellipsis)
+              : null,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_formatBytes(entry.sizeBytes),
+                  style: Theme.of(context).textTheme.bodySmall),
+              IconButton(
+                tooltip: 'Delete download',
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => onDelete(entry),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _ChapterGroupTile extends StatelessWidget {
+  const _ChapterGroupTile({
+    required this.group,
+    required this.onDelete,
+  });
+
+  final _ChapterDownloadGroup group;
+  final Future<void> Function(DownloadedChapter) onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      title: Text(group.mediaTitle,
+          style: Theme.of(context).textTheme.bodyLarge),
+      subtitle: Text(
+        '${group.entries.length} chapter${group.entries.length == 1 ? '' : 's'} · ${_formatBytes(group.totalSizeBytes)}',
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: Theme.of(context).hintColor),
+      ),
+      children: group.entries.map((entry) {
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text('Chapter ${entry.chapterNumber.toStringAsFixed(0)}'),
+          subtitle: entry.title?.isNotEmpty == true
+              ? Text(entry.title!, maxLines: 1, overflow: TextOverflow.ellipsis)
+              : null,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_formatBytes(entry.sizeBytes),
+                  style: Theme.of(context).textTheme.bodySmall),
+              IconButton(
+                tooltip: 'Delete download',
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => onDelete(entry),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _EpisodeDownloadGroup {
+  _EpisodeDownloadGroup({
+    required this.mediaId,
+    required this.mediaTitle,
+  });
+
+  final String mediaId;
+  final String mediaTitle;
+  final List<DownloadedEpisode> entries = [];
+  int totalSizeBytes = 0;
+
+  void add(DownloadedEpisode entry) {
+    entries.add(entry);
+    totalSizeBytes += entry.sizeBytes;
+  }
+}
+
+class _ChapterDownloadGroup {
+  _ChapterDownloadGroup({
+    required this.mediaId,
+    required this.mediaTitle,
+  });
+
+  final String mediaId;
+  final String mediaTitle;
+  final List<DownloadedChapter> entries = [];
+  int totalSizeBytes = 0;
+
+  void add(DownloadedChapter entry) {
+    entries.add(entry);
+    totalSizeBytes += entry.sizeBytes;
+  }
+}
+
+class _DownloadsHubData {
+  _DownloadsHubData({
+    required this.episodes,
+    required this.chapters,
+  });
+
+  final List<DownloadedEpisode> episodes;
+  final List<DownloadedChapter> chapters;
+
+  int get totalEpisodeBytes =>
+      episodes.fold(0, (value, item) => value + item.sizeBytes);
+  int get totalChapterBytes =>
+      chapters.fold(0, (value, item) => value + item.sizeBytes);
+}
+
+String _formatBytes(int bytes) {
+  if (bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  var value = bytes.toDouble();
+  var unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  final decimals = value >= 10 || unitIndex == 0 ? 0 : 1;
+  return '${value.toStringAsFixed(decimals)} ${units[unitIndex]}';
 }
 
 dynamic typeBuilder(ItemType type,
@@ -188,6 +621,12 @@ class _MyLibraryState extends State<MyLibrary> {
             child: Padding(
               padding: const EdgeInsets.only(top: 28.0),
               child: _buildHeader(),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: const DownloadsHubSection(),
             ),
           ),
           SliverToBoxAdapter(
