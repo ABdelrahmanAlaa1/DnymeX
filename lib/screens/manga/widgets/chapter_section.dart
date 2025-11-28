@@ -1,5 +1,8 @@
 // ignore_for_file: invalid_use_of_protected_member
 
+import 'dart:async';
+
+import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/controllers/settings/settings.dart';
 import 'package:anymex/screens/extensions/ExtensionSettings/ExtensionSettings.dart';
 import 'package:anymex/utils/function.dart';
@@ -16,12 +19,13 @@ import 'package:anymex/widgets/header.dart';
 import 'package:anymex/widgets/helper/tv_wrapper.dart';
 import 'package:anymex/widgets/custom_widgets/custom_text.dart';
 import 'package:anymex/widgets/custom_widgets/custom_textspan.dart';
+import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:dartotsu_extension_bridge/ExtensionManager.dart';
 import 'package:dartotsu_extension_bridge/Models/Source.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-class ChapterSection extends StatelessWidget {
+class ChapterSection extends StatefulWidget {
   final RxString searchedTitle;
   final Media anilistData;
   final RxList<Chapter> chapterList;
@@ -45,6 +49,78 @@ class ChapterSection extends StatelessWidget {
     required this.getDetailsFromSource,
     required this.showWrongTitleModal,
   });
+
+  @override
+  State<ChapterSection> createState() => _ChapterSectionState();
+}
+
+class _ChapterSectionState extends State<ChapterSection> {
+  late final DownloadController _downloadController;
+  final RxBool _usingDownloadedSource = false.obs;
+  Timer? _fallbackTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _downloadController = Get.find<DownloadController>();
+    _applyStoredSource();
+    _downloadController.refreshChapterCache(widget.anilistData.id);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChapterSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final hasChanged = oldWidget.anilistData.id != widget.anilistData.id ||
+        oldWidget.anilistData.serviceType != widget.anilistData.serviceType;
+    if (hasChanged) {
+      _applyStoredSource();
+    }
+  }
+
+  void _applyStoredSource() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.sourceController.applyStoredSourceSelection(
+        type: ItemType.manga,
+        media: widget.anilistData,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _fallbackTimer?.cancel();
+    super.dispose();
+  }
+
+  void _setDownloadedMode(bool value) {
+    _usingDownloadedSource.value = value;
+    if (value) {
+      _fetchDownloadedChapters();
+    }
+  }
+
+  Future<void> _fetchDownloadedChapters() async {
+    await _downloadController.refreshChapterCache(widget.anilistData.id);
+    widget.chapterList.value =
+        _downloadController.buildChapterModels(widget.anilistData);
+  }
+
+  void _scheduleFallback() {
+    _fallbackTimer?.cancel();
+    if (_usingDownloadedSource.value) return;
+    _fallbackTimer = Timer(const Duration(seconds: 40), () async {
+      if (!mounted) return;
+      if (widget.chapterList.value.isNotEmpty) return;
+      final next =
+          widget.sourceController.cycleToNextSource(ItemType.manga);
+      if (next == null ||
+          next.id == widget.sourceController.activeMangaSource.value?.id) {
+        return;
+      }
+      successSnackBar('Switching to ${next.name} after no results.');
+      await widget.mapToAnilist();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,8 +159,10 @@ class ChapterSection extends StatelessWidget {
                     Expanded(
                       child: AnymexTextSpans(
                         spans: [
-                          if (!searchedTitle.value.contains('Searching') &&
-                              !searchedTitle.value.contains('No Match Found'))
+                          if (!widget.searchedTitle.value
+                                  .contains('Searching') &&
+                              !widget.searchedTitle.value
+                                  .contains('No Match Found'))
                             AnymexTextSpan(
                               text: "Found: ",
                               size: 14,
@@ -94,13 +172,13 @@ class ChapterSection extends StatelessWidget {
                                   .withOpacity(0.6),
                             ),
                           AnymexTextSpan(
-                            text: searchedTitle.value,
+                            text: widget.searchedTitle.value,
                             variant: TextVariant.semiBold,
                             size: 14,
-                            color:
-                                searchedTitle.value.contains('No Match Found')
-                                    ? Theme.of(context).colorScheme.error
-                                    : Theme.of(context).colorScheme.primary,
+                            color: widget.searchedTitle.value
+                                    .contains('No Match Found')
+                                ? Theme.of(context).colorScheme.error
+                                : Theme.of(context).colorScheme.primary,
                           )
                         ],
                       ),
@@ -108,15 +186,15 @@ class ChapterSection extends StatelessWidget {
                     const SizedBox(width: 12),
                     AnymexOnTap(
                       onTap: () {
-                        showWrongTitleModal(
+                        widget.showWrongTitleModal(
                           context,
-                          anilistData.title,
+                          widget.anilistData.title,
                           (manga) async {
-                            chapterList.value = [];
-                            await getDetailsFromSource(
+                            widget.chapterList.value = [];
+                            await widget.getDetailsFromSource(
                                 Media.froDMedia(manga, ItemType.manga));
                             final key =
-                                '${sourceController.activeMangaSource.value?.id}-${anilistData.id}-${anilistData.serviceType.index}';
+                                '${widget.sourceController.activeMangaSource.value?.id}-${widget.anilistData.id}-${widget.anilistData.serviceType.index}';
                             settingsController.preferences
                                 .put(key, manga.title);
                           },
@@ -173,19 +251,24 @@ class ChapterSection extends StatelessWidget {
                   ),
                 ],
               ),
-              if (sourceController.activeMangaSource.value == null)
+              if (widget.sourceController.activeMangaSource.value == null &&
+                  !_usingDownloadedSource.value)
                 const NoSourceSelectedWidget()
-              else if (chapterList.value.isEmpty)
+              else if (widget.chapterList.value.isEmpty)
                 const SizedBox(
                   height: 500,
                   child: Center(child: AnymexProgressIndicator()),
                 )
               else
-                searchedTitle.value != "No match found"
-                    ? ChapterListBuilder(
-                        chapters: chapterList,
-                        anilistData: anilistData,
-                      )
+                widget.searchedTitle.value != "No match found"
+                    ? Obx(() => ChapterListBuilder(
+                          chapters: widget.chapterList,
+                          anilistData: widget.anilistData,
+                          showingDownloaded: _usingDownloadedSource.value,
+                          downloadedEntries:
+                              _downloadController.chapterCache[widget.anilistData.id] ??
+                                  const [],
+                        ))
                     : const Center(child: AnymexText(text: "No Match Found"))
             ],
           ),
@@ -195,30 +278,31 @@ class ChapterSection extends StatelessWidget {
   void openSourcePreferences(BuildContext context) {
     navigate(
       () => SourcePreferenceScreen(
-        source: sourceController.activeMangaSource.value!,
+        source: widget.sourceController.activeMangaSource.value!,
       ),
     );
   }
 
   Widget buildMangaSourceDropdown() {
-    List<DropdownItem> items = sourceController.installedMangaExtensions.isEmpty
-        ? [
-            const DropdownItem(
-              value: "No Sources Installed",
-              text: "No Manga Sources Available",
-              subtitle: "Install manga extensions to get started",
-              leadingIcon: Icon(
-                Icons.menu_book_outlined,
-                size: 24,
-                color: Colors.grey,
-              ),
-            ),
-          ]
-        : sourceController.installedMangaExtensions.map<DropdownItem>((source) {
+    final downloadedItem = DropdownItem(
+      value: DownloadController.downloadedSourceValue,
+      text: DownloadController.downloadedSourceLabel.toUpperCase(),
+      subtitle: 'Offline Library',
+      leadingIcon: Icon(
+        Icons.download_done_rounded,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+    );
+
+    List<DropdownItem> sourceItems =
+        widget.sourceController.installedMangaExtensions.isEmpty
+            ? []
+            : widget.sourceController.installedMangaExtensions
+                .map<DropdownItem>((source) {
             final isMangayomi = source.extensionType == ExtensionType.mangayomi;
 
             return DropdownItem(
-              value: '${source.name} (${source.lang?.toUpperCase()})',
+              value: source.id?.toString() ?? source.name ?? 'unknown',
               text: source.name?.toUpperCase() ?? 'Unknown Source',
               subtitle: source.lang?.toUpperCase() ?? 'Unknown',
               leadingIcon: NetworkSizedImage(
@@ -232,17 +316,19 @@ class ChapterSection extends StatelessWidget {
             );
           }).toList();
 
+    List<DropdownItem> items = [downloadedItem, ...sourceItems];
+
     DropdownItem? selectedItem;
-    if (sourceController.installedMangaExtensions.isEmpty) {
-      selectedItem = items.first;
+    if (_usingDownloadedSource.value) {
+      selectedItem = downloadedItem;
     } else {
-      final activeSource = sourceController.activeMangaSource.value;
+      final activeSource = widget.sourceController.activeMangaSource.value;
       if (activeSource != null) {
         final isMangayomi =
             activeSource.extensionType == ExtensionType.mangayomi;
 
         selectedItem = DropdownItem(
-          value: '${activeSource.name} (${activeSource.lang?.toUpperCase()})',
+          value: activeSource.id?.toString() ?? activeSource.name ?? 'unknown',
           text: activeSource.name?.toUpperCase() ?? 'Unknown Source',
           subtitle: 'Manga • ${activeSource.lang?.toUpperCase() ?? 'Unknown'}',
           leadingIcon: NetworkSizedImage(
@@ -266,11 +352,29 @@ class ChapterSection extends StatelessWidget {
       icon: Icons.extension_rounded,
       actionIcon: Icons.settings_outlined,
       onActionPressed: () => openSourcePreferences(Get.context!),
+      enableSearch: true,
       onChanged: (DropdownItem item) async {
-        chapterList.value = [];
+        if (item.value == DownloadController.downloadedSourceValue) {
+          _setDownloadedMode(true);
+          return;
+        }
+
+        _setDownloadedMode(false);
+        widget.chapterList.value = [];
         try {
-          sourceController.getMangaExtensionByName(item.value);
-          await mapToAnilist();
+          final selectedSource = widget.sourceController.installedMangaExtensions
+              .firstWhereOrNull((source) =>
+                  source.id?.toString() == item.value || source.name == item.value);
+          if (selectedSource != null) {
+            widget.sourceController.rememberSourceSelectionForMedia(
+              type: ItemType.manga,
+              media: widget.anilistData,
+              source: selectedSource,
+            );
+            widget.sourceController.setActiveSource(selectedSource);
+          }
+          _scheduleFallback();
+          await widget.mapToAnilist();
         } catch (e) {
           Logger.i(e.toString());
         }
