@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/controllers/discord/discord_rpc.dart';
 import 'package:anymex/controllers/offline/offline_storage_controller.dart';
 import 'package:anymex/controllers/service_handler/params.dart';
@@ -108,6 +109,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       anilistData.id, currentEpisode.value.number);
 
   final offlineStorage = Get.find<OfflineStorageController>();
+  final downloadController = Get.find<DownloadController>();
 
   PlayerSettings get playerSettings => settings.playerSettings.value;
 
@@ -152,6 +154,8 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
 
   final Rx<bool> isSubtitlePaneOpened = false.obs;
   final Rx<bool> isEpisodePaneOpened = false.obs;
+  final RxList<DownloadedEpisode> downloadedEpisodes =
+      <DownloadedEpisode>[].obs;
 
   final RxBool canGoForward = false.obs;
   final RxBool canGoBackward = false.obs;
@@ -164,6 +168,8 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
 
   final currentVisualProfile = 'natural'.obs;
   RxMap<String, int> customSettings = <String, int>{}.obs;
+
+  Worker? _downloadCacheWorker;
 
   bool _hasTrackedInitialOnline = false;
   bool _hasTrackedInitialLocal = false;
@@ -191,6 +197,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     _initDatabaseVars();
     _initOrientations();
     _initializePlayer();
+    _initDownloadBindings();
     _updateRpc();
     if (!isOffline.value) {
       _initializeAniSkip();
@@ -228,6 +235,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
+    _downloadCacheWorker?.dispose();
     super.onClose();
   }
 
@@ -327,6 +335,26 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
         brightness.value = value;
       });
     } catch (_) {}
+  }
+
+  void _initDownloadBindings() {
+    _syncDownloadedEpisodes();
+    _downloadCacheWorker = ever(downloadController.episodeCache, (_) {
+      _syncDownloadedEpisodes();
+    });
+    downloadController.refreshEpisodeCache(anilistData.id);
+  }
+
+  void _syncDownloadedEpisodes() {
+    downloadedEpisodes.assignAll(
+        downloadController.episodeCache[anilistData.id] ?? const []);
+  }
+
+  DownloadedEpisode? downloadedEntryForEpisode(Episode episode) {
+    return downloadedEpisodes.firstWhereOrNull((entry) {
+      return entry.episodeNumber == episode.number ||
+          entry.episodeNumber == episode.number.padLeft(3, '0');
+    });
   }
 
   void _initializePlayer() {
@@ -539,14 +567,23 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  Future<void> fetchEpisode(Episode episode) async {
+  Future<void> fetchEpisode(Episode episode,
+      {DownloadedEpisode? downloaded}) async {
+    if (downloaded != null) {
+      await _playDownloadedEpisode(downloaded);
+      updateNavigatorState();
+      return;
+    }
+
     if (isOffline.value) {
       Logger.i('Offline mode: skipping episode fetch');
       return;
     }
 
+    var loaderShown = false;
     try {
       PlayerBottomSheets.showLoader();
+      loaderShown = true;
       final data = await sourceController.activeSource.value!.methods
           .getVideoList(
               d.DEpisode(episodeNumber: episode.number, url: episode.link));
@@ -556,10 +593,12 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       _extractSubtitles();
       await _switchMedia(
           selectedVideo.value!.url, selectedVideo.value?.headers);
-      PlayerBottomSheets.hideLoader();
     } catch (e) {
       Logger.i(e.toString());
     } finally {
+      if (loaderShown && (Get.isBottomSheetOpen ?? false)) {
+        PlayerBottomSheets.hideLoader();
+      }
       updateNavigatorState();
     }
   }
@@ -612,6 +651,38 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       {Duration? startPosition}) async {
     await player.open(Media(''));
     await player.open(Media(url, httpHeaders: headers, start: startPosition));
+  }
+
+  Future<void> _playDownloadedEpisode(DownloadedEpisode downloaded) async {
+    final path = downloaded.filePath;
+    if (path == null || path.isEmpty) {
+      errorSnackBar(
+          'Offline file missing for episode ${downloaded.episodeNumber}.');
+      return;
+    }
+
+    final file = File(path);
+    if (!file.existsSync()) {
+      errorSnackBar('Downloaded file is missing on disk.');
+      return;
+    }
+
+    final uri = Uri.file(file.path).toString();
+    final offlineVideo = model.Video(
+      uri,
+      DownloadController.downloadedSourceLabel,
+      file.path,
+      headers: const {},
+    );
+
+    selectedVideo.value = offlineVideo;
+    episodeTracks.value = [offlineVideo];
+    currentEpisode.value.currentTrack = offlineVideo;
+    currentEpisode.value.videoTracks = [offlineVideo];
+    currentEpisode.value.link = file.path;
+    currentEpisode.value.source = DownloadController.downloadedSourceLabel;
+
+    await _switchMedia(uri, offlineVideo.headers);
   }
 
   void delete() {
@@ -876,7 +947,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     canGoBackward.value = hasPreviousEpisode;
   }
 
-  void changeEpisode(Episode episode) {
+  void changeEpisode(Episode episode, {DownloadedEpisode? downloaded}) {
     _trackLocally();
 
     if (!isOffline.value) {
@@ -892,7 +963,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     _hasTrackedInitialLocal = false;
     _hasTrackedInitialOnline = false;
 
-    fetchEpisode(episode);
+    fetchEpisode(episode, downloaded: downloaded);
     onUserInteraction();
   }
 
