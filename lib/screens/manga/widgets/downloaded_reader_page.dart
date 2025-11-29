@@ -27,6 +27,44 @@ class _DownloadedReaderPageState extends State<DownloadedReaderPage> {
       .map((file) => p.join(widget.chapter.directory.path, file))
       .toList();
 
+  String _displayTitle() {
+    final title = widget.media.title;
+    if (title == null) return 'Downloaded chapter';
+
+    if (title is String) {
+      return title.isNotEmpty ? title : 'Downloaded chapter';
+    }
+
+    if (title is Map) {
+      for (final key in ['userPreferred', 'romaji', 'english', 'title']) {
+        final value = title[key];
+        if (value is String && value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+
+    try {
+      final dynamic dyn = title;
+      final userPreferred = dyn.userPreferred;
+      if (userPreferred is String && userPreferred.isNotEmpty) {
+        return userPreferred;
+      }
+      final romaji = dyn.romaji;
+      if (romaji is String && romaji.isNotEmpty) {
+        return romaji;
+      }
+      final english = dyn.english;
+      if (english is String && english.isNotEmpty) {
+        return english;
+      }
+    } catch (_) {
+      // ignore dynamic access failures
+    }
+
+    return title.toString().isNotEmpty ? title.toString() : 'Downloaded chapter';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -61,7 +99,7 @@ class _DownloadedReaderPageState extends State<DownloadedReaderPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              widget.media.title?.userPreferred ?? widget.media.title?.romaji ?? 'Downloaded chapter',
+              _displayTitle(),
               style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
             const SizedBox(height: 4),
