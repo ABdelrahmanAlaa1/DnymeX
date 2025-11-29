@@ -36,8 +36,8 @@ class _DownloadedReaderPageState extends State<DownloadedReaderPage> {
     }
 
     if (title is Map) {
-      for (final key in ['userPreferred', 'romaji', 'english', 'title']) {
-        final value = title[key];
+      for (final String key in ['userPreferred', 'romaji', 'english', 'title']) {
+        final dynamic value = title[key];
         if (value is String && value.isNotEmpty) {
           return value;
         }
