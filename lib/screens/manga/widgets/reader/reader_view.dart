@@ -439,17 +439,6 @@ class _ReaderViewState extends State<ReaderView> with TickerProviderStateMixin {
       loadStateChanged: loadStateBuilder,
     );
   }
-      mode: ExtendedImageMode.none,
-      gaplessPlayback: true,
-      cache: true,
-      headers: headers,
-      fit: BoxFit.contain,
-      alignment: Alignment.center,
-      filterQuality: FilterQuality.medium,
-      enableLoadState: true,
-      loadStateChanged: loadStateBuilder,
-    );
-  }
 
   Widget _buildLoadStateWidget(
     ExtendedImageState state,

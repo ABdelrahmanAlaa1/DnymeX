@@ -791,12 +791,12 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
       throw Exception('No images found in downloaded chapter.');
     }
 
-    pageList.value = files
-        .map((file) => PageUrl(
-              url: Uri.file(file.path).toString(),
-              headers: const {},
-            ))
-        .toList();
+  pageList.value = files
+    .map((file) => PageUrl(
+        Uri.file(file.path).toString(),
+        headers: const {},
+      ))
+    .toList();
     _processPages();
 
     loadingState.value = LoadingState.loaded;

@@ -9,7 +9,6 @@ import 'package:dartotsu_extension_bridge/Models/Source.dart';
 import 'package:anymex/utils/logger.dart';
 import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:dartotsu_extension_bridge/Models/DEpisode.dart';
-import 'package:dartotsu_extension_bridge/Models/Subtitle.dart';
 import 'package:dartotsu_extension_bridge/Models/Video.dart';
 import 'package:dartotsu_extension_bridge/dartotsu_extension_bridge.dart';
 import 'package:dio/dio.dart';
@@ -767,6 +766,23 @@ class DownloadController extends GetxController {
     await file.writeAsBytes(response.data!);
   }
 
+  Future<File> getNetworkImageFile(
+    String url, {
+    Map<String, String>? headers,
+  }) async {
+    final provider = ExtendedNetworkImageProvider(
+      url,
+      headers: headers,
+      cache: true,
+      cacheMaxAge: const Duration(days: 7),
+    );
+    final cachedFile = await provider.getNetworkImageFile();
+    if (cachedFile == null) {
+      throw Exception('Unable to retrieve network image for $url');
+    }
+    return File(cachedFile.path);
+  }
+
   Future<DownloadedSubtitle?> _downloadPreferredSubtitle({
     required Video video,
     required Directory targetDir,
@@ -797,7 +813,7 @@ class DownloadController extends GetxController {
   }
 
   _SubtitleChoice? _selectSubtitleTrack(
-    List<Subtitle> subtitles, {
+    List<dynamic> subtitles, {
     String? preferredLanguage,
   }) {
     final normalizedPreferred = _normalizeLanguageCode(preferredLanguage);
@@ -824,7 +840,7 @@ class DownloadController extends GetxController {
     return _SubtitleChoice(subtitle: subtitles.first, languageCode: null);
   }
 
-  bool _subtitleMatchesLanguage(Subtitle subtitle, String languageCode) {
+  bool _subtitleMatchesLanguage(dynamic subtitle, String languageCode) {
     return _labelMatchesLanguage(subtitle.label, languageCode);
   }
 
@@ -1039,7 +1055,7 @@ const Map<String, String> _languageDisplayNames = {
 };
 
 class _SubtitleChoice {
-  final Subtitle subtitle;
+  final dynamic subtitle;
   final String? languageCode;
 
   _SubtitleChoice({required this.subtitle, required this.languageCode});

@@ -68,5 +68,4 @@ class Deeplink {
   }
 
   static bool _hasValue(String? value) => value != null && value.trim().isNotEmpty;
-  }
 }
