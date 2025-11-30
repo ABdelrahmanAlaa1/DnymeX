@@ -298,7 +298,11 @@ jobs:
             exit 1
           }
           flutter pub get
-          dart run inno_bundle:build --release 2>&1 | Select-String -Pattern "Compile aborted" -NotMatch
+          dart run inno_bundle:build --release
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "inno_bundle build failed with exit code $LASTEXITCODE"
+            exit 1
+          }
           $issFile = "build\windows\x64\installer\Release\inno-script.iss"
           if (-not (Test-Path $issFile)) {
               Write-Error "ISS file not found: $issFile"
