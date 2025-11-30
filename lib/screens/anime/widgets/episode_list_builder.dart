@@ -12,6 +12,8 @@ import 'package:anymex/models/Media/media.dart';
 import 'package:anymex/models/Offline/Hive/episode.dart';
 import 'package:anymex/screens/anime/watch/watch_view.dart';
 import 'package:anymex/screens/anime/watch_page.dart';
+import 'package:anymex/screens/local_source/player/offline_player.dart';
+import 'package:anymex/screens/local_source/player/offline_player_old.dart';
 import 'package:anymex/screens/anime/widgets/episode/normal_episode.dart';
 import 'package:anymex/screens/anime/widgets/episode_range.dart';
 import 'package:anymex/screens/anime/widgets/track_dialog.dart';
@@ -47,6 +49,39 @@ class EpisodeListBuilder extends StatefulWidget {
 
   @override
   State<EpisodeListBuilder> createState() => _EpisodeListBuilderState();
+}
+
+class _BlockingProgressDialog extends StatelessWidget {
+  const _BlockingProgressDialog({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            const SizedBox(width: 16),
+            Flexible(
+              child: Text(
+                message,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
@@ -216,6 +251,10 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
         final isDownloading = widget.anilistData != null &&
           _downloadController.isEpisodeDownloading(
             widget.anilistData!.id, episode.number);
+        final downloadProgress = (isDownloading && widget.anilistData != null)
+            ? _downloadController.getEpisodeProgress(
+                widget.anilistData!.id, episode.number)
+            : null;
 
                 return Opacity(
                   opacity: completedEpisode
@@ -236,7 +275,7 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
                         offlineEpisodes: offlineEpisodes,
                         onTap: () {
                           if (widget.showingDownloaded && isDownloaded) {
-                            _openDownloadedEpisode(episode);
+                            _openDownloadedEpisode(episode, downloadEntry);
                           } else {
                             _handleEpisodeSelection(episode);
                           }
@@ -251,8 +290,10 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
                             context,
                             isDownloaded: isDownloaded,
                             isDownloading: isDownloading,
+                            progress: downloadProgress,
                             onTap: isDownloaded
-                                ? () => _openDownloadedEpisode(episode)
+                                ? () =>
+                                    _openDownloadedEpisode(episode, downloadEntry)
                                 : () => _downloadEpisode(episode),
                           ),
                         ),
@@ -269,28 +310,221 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
 
   Future<void> _downloadEpisode(Episode episode) async {
     if (widget.anilistData == null) return;
-    _downloadController.downloadEpisode(
+    final videos = await _loadDownloadServers(episode);
+    if (!mounted || videos.isEmpty) return;
+
+    if (videos.length == 1) {
+      final label = _serverPrimaryLabel(videos.first, 0);
+      infoSnackBar('Downloading from $label');
+      await _startEpisodeDownload(episode, videos.first);
+      return;
+    }
+
+    await _showDownloadServerSheet(episode, videos);
+  }
+
+  Future<List<Video>> _loadDownloadServers(Episode episode) async {
+    if (!mounted) return [];
+    final navigator = Navigator.of(context, rootNavigator: true);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _BlockingProgressDialog(
+        message: 'Fetching available servers…',
+      ),
+    );
+    try {
+      final link = episode.link;
+      if (link == null || link.isEmpty) {
+        errorSnackBar('Episode link missing for downloads.');
+        return [];
+      }
+
+      final activeSource = sourceController.activeSource.value;
+      if (activeSource == null) {
+        errorSnackBar('Select a source before downloading this episode.');
+        return [];
+      }
+
+      final videos = await activeSource.methods
+          .getVideoList(DEpisode(episodeNumber: episode.number, url: link));
+      if (videos.isEmpty) {
+        errorSnackBar('Source returned no downloadable streams.');
+      }
+      return videos;
+    } catch (e) {
+      errorSnackBar('Failed to fetch download servers: $e');
+      return [];
+    } finally {
+      if (navigator.mounted) {
+        navigator.pop();
+      }
+    }
+  }
+
+  Future<void> _showDownloadServerSheet(
+      Episode episode, List<Video> videos) async {
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant
+                          .withOpacity(0.4),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                Text(
+                  'Choose a server',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Pick the stream you want to download. Higher bitrates take longer and use more space.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Theme.of(context).hintColor),
+                ),
+                const SizedBox(height: 16),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.6,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: videos.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (ctx, index) {
+                      final video = videos[index];
+                      final primary = _serverPrimaryLabel(video, index);
+                      final secondary = _serverSecondaryLabel(video);
+                      return ListTile(
+                        leading: CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .primaryContainer,
+                          child: Text(
+                            '${index + 1}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        title: Text(primary),
+                        subtitle: secondary != null
+                            ? Text(
+                                secondary,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              )
+                            : null,
+                        trailing: const Icon(Icons.download_rounded),
+                        onTap: () async {
+                          Navigator.of(sheetContext).pop();
+                          infoSnackBar('Downloading from $primary');
+                          await _startEpisodeDownload(episode, video);
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _startEpisodeDownload(Episode episode, Video video) async {
+    await _downloadController.downloadEpisode(
       media: widget.anilistData!,
       episode: episode,
+      selectedVideo: video,
     );
+  }
+
+  String _serverPrimaryLabel(Video video, int index) {
+    final title = video.title?.trim();
+    final quality = video.quality?.trim();
+    if (title?.isNotEmpty == true && quality?.isNotEmpty == true) {
+      return '$title · $quality';
+    }
+    if (quality?.isNotEmpty == true) {
+      return quality!;
+    }
+    if (title?.isNotEmpty == true) {
+      return title!;
+    }
+    return 'Server ${index + 1}';
+  }
+
+  String? _serverSecondaryLabel(Video video) {
+    final host = Uri.tryParse(video.url)?.host;
+    return host?.isNotEmpty == true ? host : null;
   }
 
   Widget _buildDownloadBadge(BuildContext context,
       {required bool isDownloaded,
       required bool isDownloading,
+      double? progress,
       required VoidCallback onTap}) {
     if (isDownloading) {
+      final percent = progress != null ? (progress * 100).clamp(0, 100) : null;
       return Container(
-        width: 34,
-        height: 34,
-        padding: const EdgeInsets.all(6),
+        width: 38,
+        height: 38,
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+          color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
           shape: BoxShape.circle,
         ),
-        child: CircularProgressIndicator(
-          strokeWidth: 2.5,
-          color: Theme.of(context).colorScheme.primary,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: 34,
+              height: 34,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Theme.of(context).colorScheme.primary,
+                value: progress,
+              ),
+            ),
+            if (percent != null)
+              Text(
+                '${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}%',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+          ],
         ),
       );
     }
@@ -318,12 +552,18 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
     );
   }
 
-  void _openDownloadedEpisode(Episode episode) {
+  void _openDownloadedEpisode(Episode episode,
+      [DownloadedEpisode? cachedEntry]) {
     if (widget.anilistData == null) {
       errorSnackBar('Missing media information for playback.');
       return;
     }
-    final filePath = episode.link;
+    final downloadEntry = cachedEntry ??
+        _downloadController.findDownloadedEpisode(
+          widget.anilistData!.id,
+          episode.number,
+        );
+    final filePath = downloadEntry?.filePath ?? episode.link;
     if (filePath == null || filePath.isEmpty) {
       errorSnackBar('Offline file path missing for episode ${episode.number}.');
       return;
@@ -334,19 +574,62 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
       return;
     }
 
-    final source = hive.Video(
-      Uri.file(file.path).toString(),
-      'Offline',
-      file.path,
+  final subtitleTracksRaw = (downloadEntry?.subtitles ?? [])
+    .where((subtitle) =>
+      subtitle.path.isNotEmpty && File(subtitle.path).existsSync())
+    .map((subtitle) => hive.Track(
+        file: Uri.file(subtitle.path).toString(),
+        label: subtitle.displayLabel,
+      ))
+    .toList();
+  final subtitleTracks =
+    subtitleTracksRaw.isEmpty ? null : subtitleTracksRaw;
+
+    String _firstNonEmpty(List<String?> values, String fallback) {
+      for (final value in values) {
+        if (value != null && value.trim().isNotEmpty && value != '?') {
+          return value;
+        }
+      }
+      return fallback;
+    }
+
+    final folderName = _firstNonEmpty(
+        [
+          widget.anilistData?.title,
+          widget.anilistData?.romajiTitle,
+          downloadEntry?.mediaTitle,
+        ],
+        'Downloads');
+
+    final episodeName = episode.title?.isNotEmpty == true
+        ? episode.title!
+        : 'Episode ${episode.number}';
+
+    final offlineEpisode = LocalEpisode(
+      folderName: folderName,
+      name: episodeName,
+      path: file.path,
     );
 
-    navigate(() => WatchPage(
-          episodeSrc: source,
-          episodeList: widget.episodeList,
-          anilistData: widget.anilistData!,
-          currentEpisode: episode,
-          episodeTracks: [source],
-          shouldTrack: false,
+    final useOldPlayer = settingsController.preferences
+        .get('useOldPlayer', defaultValue: false);
+
+    if (useOldPlayer) {
+      navigate(() => OfflineWatchPageOld(
+            episodePath: offlineEpisode,
+            episodesList: const [],
+          ));
+      return;
+    }
+
+    navigate(() => OfflineWatchPage(
+          episode: offlineEpisode,
+          episodeList: const [],
+          currentEpisodeData: episode,
+          episodeCatalog: widget.episodeList,
+          anilistData: widget.anilistData,
+          subtitleTracks: subtitleTracks,
         ));
   }
 

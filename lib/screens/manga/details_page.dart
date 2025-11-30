@@ -153,12 +153,28 @@ class _MangaDetailsPageState extends State<MangaDetailsPage> {
   }
 
   Future<void> _mapToService() async {
-    final key =
-        '${sourceController.activeMangaSource.value?.id}-${anilistData?.id}-${mediaService.index}';
-    final savedTitle =
-        settingsController.preferences.get(key, defaultValue: null);
-    final mappedData = await mapMedia(formatTitles(anilistData!), searchedTitle,
-        savedTitle: savedTitle);
+    final initialSourceId = sourceController.activeMangaSource.value?.id;
+    Media? mappedData;
+
+    while (true) {
+      final key =
+          '${sourceController.activeMangaSource.value?.id}-${anilistData?.id}-${mediaService.index}';
+      final savedTitle =
+          settingsController.preferences.get(key, defaultValue: null);
+
+      mappedData = await mapMedia(formatTitles(anilistData!), searchedTitle,
+          savedTitle: savedTitle);
+
+      if (mappedData != null) break;
+
+      await Future.delayed(const Duration(milliseconds: 150));
+      final nextSource = sourceController.cycleToNextSource(ItemType.manga);
+
+      if (nextSource == null || nextSource.id == initialSourceId) {
+        break;
+      }
+    }
+
     if (mappedData != null) {
       await _fetchSourceDetails(mappedData);
     }

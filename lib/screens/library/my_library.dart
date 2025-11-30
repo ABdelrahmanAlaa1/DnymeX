@@ -4,12 +4,14 @@ import 'package:anymex/controllers/service_handler/service_handler.dart';
 import 'package:anymex/controllers/settings/settings.dart';
 import 'package:anymex/controllers/source/source_controller.dart';
 import 'package:anymex/models/Media/media.dart';
+import 'package:anymex/models/Offline/Hive/chapter.dart';
 import 'package:anymex/models/Offline/Hive/offline_media.dart';
 import 'package:anymex/screens/anime/details_page.dart';
 import 'package:anymex/screens/library/editor/list_editor.dart';
 import 'package:anymex/screens/library/widgets/history_model.dart';
 import 'package:anymex/screens/library/widgets/library_deps.dart';
 import 'package:anymex/screens/manga/details_page.dart';
+import 'package:anymex/screens/manga/reading_page.dart';
 import 'package:anymex/screens/novel/details/details_view.dart';
 import 'package:anymex/screens/settings/widgets/history_card_gate.dart';
 import 'package:anymex/screens/settings/widgets/history_card_selector.dart';
@@ -77,46 +79,138 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
     _refresh();
   }
 
+  void _openChapterFromGroup(
+      _ChapterDownloadGroup group, DownloadedChapter chapter) {
+    final media = Media(
+      id: group.mediaId,
+      title: group.mediaTitle,
+      romajiTitle: group.mediaTitle,
+      serviceType: ServicesType.simkl,
+    );
+
+    final chapters = group.entries
+        .map((entry) => Chapter(
+              title: entry.title ??
+                  'Chapter ${entry.chapterNumber.toStringAsFixed(0)}',
+              number: entry.chapterNumber,
+              link: entry.directory.path,
+              sourceName: DownloadController.downloadedSourceLabel,
+            ))
+        .toList()
+      ..sort((a, b) =>
+          (a.number ?? 0).compareTo((b.number ?? 0)));
+
+    Chapter current = chapters.firstWhere(
+      (item) => item.number == chapter.chapterNumber,
+      orElse: () => Chapter(
+        title: chapter.title ??
+            'Chapter ${chapter.chapterNumber.toStringAsFixed(0)}',
+        number: chapter.chapterNumber,
+        link: chapter.directory.path,
+        sourceName: DownloadController.downloadedSourceLabel,
+      ),
+    );
+
+    if (!chapters.contains(current)) {
+      chapters.add(current);
+      chapters.sort((a, b) =>
+          (a.number ?? 0).compareTo((b.number ?? 0)));
+    }
+
+    navigate(() => ReadingPage(
+          anilistData: media,
+          chapterList: chapters,
+          currentChapter: current,
+          shouldTrack: false,
+        ));
+  }
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<_DownloadsHubData>(
-      future: _downloadsFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _buildLoadingCard(context);
-        }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildActiveDownloadsSection(context),
+        FutureBuilder<_DownloadsHubData>(
+          future: _downloadsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return _buildLoadingCard(context);
+            }
 
-        if (snapshot.hasError) {
-          return _buildErrorCard(context);
-        }
+            if (snapshot.hasError) {
+              return _buildErrorCard(context);
+            }
 
-        final data = snapshot.data!;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _DownloadsSummaryCard<DownloadedEpisode>(
-              title: 'Anime Downloads',
-              totalSizeBytes: data.totalEpisodeBytes,
-              itemCount: data.episodes.length,
-              groups: _groupEpisodes(data.episodes),
-              onDeleteEpisode: _deleteEpisode,
-              onDeleteChapter: _deleteChapter,
-              onRefresh: _refresh,
+            final data = snapshot.data!;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _DownloadsSummaryCard<DownloadedEpisode>(
+                  title: 'Anime Downloads',
+                  totalSizeBytes: data.totalEpisodeBytes,
+                  itemCount: data.episodes.length,
+                  groups: _groupEpisodes(data.episodes),
+                  onDeleteEpisode: _deleteEpisode,
+                  onDeleteChapter: _deleteChapter,
+                  onRefresh: _refresh,
+                ),
+                const SizedBox(height: 12),
+                _DownloadsSummaryCard<DownloadedChapter>(
+                  title: 'Manga Downloads',
+                  totalSizeBytes: data.totalChapterBytes,
+                  itemCount: data.chapters.length,
+                  groups: _groupChapters(data.chapters),
+                  onDeleteEpisode: _deleteEpisode,
+                  onDeleteChapter: _deleteChapter,
+                  onRefresh: _refresh,
+                  onOpenChapter: _openChapterFromGroup,
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveDownloadsSection(BuildContext context) {
+    return Obx(() {
+      final contextEntries =
+          _downloadController.progressContexts.entries.toList();
+      final progressSnapshot = Map<String, double>.from(_downloadController.progress);
+      final episodeEntries = contextEntries
+          .where((entry) => entry.value.type == ItemType.anime)
+          .toList();
+      final mangaEntries = contextEntries
+          .where((entry) => entry.value.type == ItemType.manga)
+          .toList();
+
+      if (episodeEntries.isEmpty && mangaEntries.isEmpty) {
+        return const SizedBox.shrink();
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (episodeEntries.isNotEmpty)
+            _ActiveDownloadsCard(
+              title: 'Active episode downloads',
+              entries: episodeEntries,
+              progressValues: progressSnapshot,
             ),
-            const SizedBox(height: 12),
-            _DownloadsSummaryCard<DownloadedChapter>(
-              title: 'Manga Downloads',
-              totalSizeBytes: data.totalChapterBytes,
-              itemCount: data.chapters.length,
-              groups: _groupChapters(data.chapters),
-              onDeleteEpisode: _deleteEpisode,
-              onDeleteChapter: _deleteChapter,
-              onRefresh: _refresh,
+          if (mangaEntries.isNotEmpty) ...[
+            if (episodeEntries.isNotEmpty) const SizedBox(height: 12),
+            _ActiveDownloadsCard(
+              title: 'Active manga downloads',
+              entries: mangaEntries,
+              progressValues: progressSnapshot,
             ),
           ],
-        );
-      },
-    );
+          const SizedBox(height: 12),
+        ],
+      );
+    });
   }
 
   Widget _buildLoadingCard(BuildContext context) {
@@ -214,6 +308,7 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
     required this.onRefresh,
     required this.onDeleteEpisode,
     required this.onDeleteChapter,
+    this.onOpenChapter,
   });
 
   final String title;
@@ -223,6 +318,7 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
   final VoidCallback onRefresh;
   final Future<void> Function(DownloadedEpisode) onDeleteEpisode;
   final Future<void> Function(DownloadedChapter) onDeleteChapter;
+  final void Function(_ChapterDownloadGroup, DownloadedChapter)? onOpenChapter;
 
   String get _summaryLabel {
     final buffer = StringBuffer();
@@ -300,11 +396,117 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
                     return _ChapterGroupTile(
                       group: group,
                       onDelete: onDeleteChapter,
+                      onOpen: onOpenChapter == null
+                          ? null
+                          : (chapter) => onOpenChapter!(group, chapter),
                     );
                   }
                   return const SizedBox.shrink();
                 }).toList(),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActiveDownloadsCard extends StatelessWidget {
+  const _ActiveDownloadsCard({
+    required this.title,
+    required this.entries,
+    required this.progressValues,
+  });
+
+  final String title;
+  final List<MapEntry<String, DownloadProgressContext>> entries;
+  final Map<String, double> progressValues;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(18.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            ...entries.map((entry) {
+              final contextData = entry.value;
+              final progress = (progressValues[entry.key] ?? 0).clamp(0.0, 1.0);
+              final label = contextData.type == ItemType.anime
+                  ? 'Episode ${contextData.episodeNumber ?? '?'}'
+                  : 'Chapter ${contextData.chapterNumber?.toStringAsFixed(0) ?? '?'}';
+              final detail = contextData.type == ItemType.anime
+                  ? contextData.episodeTitle
+                  : contextData.chapterTitle;
+              final headline =
+                  '${contextData.mediaTitle ?? 'Unknown title'} · $label';
+              final percentLabel =
+                  '${(progress * 100).toStringAsFixed(progress >= 10 ? 0 : 1)}%';
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            headline,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        Text(
+                          percentLabel,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    if (detail?.isNotEmpty == true)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2.0),
+                        child: Text(
+                          detail!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Theme.of(context).hintColor),
+                        ),
+                      ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: LinearProgressIndicator(
+                        minHeight: 6,
+                        value: progress,
+                        backgroundColor:
+                            Theme.of(context).colorScheme.surfaceVariant,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
           ],
         ),
       ),
@@ -364,10 +566,12 @@ class _ChapterGroupTile extends StatelessWidget {
   const _ChapterGroupTile({
     required this.group,
     required this.onDelete,
+    this.onOpen,
   });
 
   final _ChapterDownloadGroup group;
   final Future<void> Function(DownloadedChapter) onDelete;
+  final void Function(DownloadedChapter)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -386,6 +590,7 @@ class _ChapterGroupTile extends StatelessWidget {
       children: group.entries.map((entry) {
         return ListTile(
           contentPadding: EdgeInsets.zero,
+          onTap: onOpen == null ? null : () => onOpen!(entry),
           title: Text('Chapter ${entry.chapterNumber.toStringAsFixed(0)}'),
           subtitle: entry.title?.isNotEmpty == true
               ? Text(entry.title!, maxLines: 1, overflow: TextOverflow.ellipsis)

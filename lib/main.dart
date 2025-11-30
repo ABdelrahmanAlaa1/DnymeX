@@ -143,13 +143,17 @@ void initDeepLinkListener() async {
 
   try {
     final initialUri = await appLinks.getInitialLink();
-    if (initialUri != null) Deeplink.handleDeepLink(initialUri);
+    if (initialUri != null) await Deeplink.handleDeepLink(initialUri);
   } catch (err) {
     errorSnackBar('Error getting initial deep link: $err');
   }
 
   appLinks.uriLinkStream.listen(
-    (uri) => Deeplink.handleDeepLink(uri),
+    (uri) {
+      Deeplink.handleDeepLink(uri).catchError(
+        (err) => errorSnackBar('Error Opening link: $err'),
+      );
+    },
     onError: (err) => errorSnackBar('Error Opening link: $err'),
   );
 }

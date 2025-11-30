@@ -40,11 +40,8 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
       setState(() {
-        _controller.text = widget.type == ItemType.anime
-            ? sourceController.activeAnimeRepo
-            : widget.type == ItemType.manga
-                ? sourceController.activeMangaRepo
-                : sourceController.activeNovelRepo;
+        final repos = _currentRepoList();
+        _controller.text = repos.join('\n');
       });
     });
   }
@@ -56,17 +53,36 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
     super.dispose();
   }
 
-  String? _validateUrl(String url) {
-    if (url.isEmpty) {
-      return 'Please enter a GitHub repository URL';
+  List<String> _parseEntries(String raw) {
+    return raw
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _currentRepoList() {
+    switch (widget.type) {
+      case ItemType.anime:
+        return sourceController.getAnimeRepo(widget.extType);
+      case ItemType.manga:
+        return sourceController.getMangaRepo(widget.extType);
+      case ItemType.novel:
+        return sourceController.activeNovelRepo;
+    }
+  }
+
+  String? _validateUrl(List<String> urls) {
+    if (urls.isEmpty) {
+      return 'Please enter at least one repository URL';
     }
 
     return null;
   }
 
   void _handleSubmit() async {
-    final url = _controller.text.trim();
-    final error = _validateUrl(url);
+    final urls = _parseEntries(_controller.text);
+    final error = _validateUrl(urls);
 
     setState(() {
       _errorMessage = error;
@@ -81,15 +97,15 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
 
       switch (widget.type) {
         case ItemType.anime:
-          sourceController.setAnimeRepo(url, widget.extType);
+          sourceController.setAnimeRepo(urls, widget.extType);
           break;
 
         case ItemType.manga:
-          sourceController.setMangaRepo(url, widget.extType);
+          sourceController.setMangaRepo(urls, widget.extType);
           break;
 
         case ItemType.novel:
-          sourceController.activeNovelRepo = url;
+          sourceController.activeNovelRepo = urls;
           break;
       }
 

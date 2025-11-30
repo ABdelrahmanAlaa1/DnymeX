@@ -6,7 +6,7 @@ import 'package:dartotsu_extension_bridge/ExtensionManager.dart';
 import 'package:dartotsu_extension_bridge/Models/Source.dart';
 
 class Deeplink {
-  static void handleDeepLink(Uri uri) {
+  static Future<void> handleDeepLink(Uri uri) async {
     if (uri.host != 'add-repo') return;
     ExtensionType extType;
     String? repoUrl;
@@ -39,22 +39,34 @@ class Deeplink {
       novelUrl = uri.queryParameters["novel_url"]?.trim();
     }
 
-    if (repoUrl != null) {
-      Extensions().addRepo(ItemType.anime, repoUrl, extType);
+    final manager = Extensions();
+    final futures = <Future<bool>>[];
+
+    if (_hasValue(repoUrl)) {
+      futures.add(manager.addRepo(ItemType.anime, repoUrl!, extType));
     }
 
-    if (mangaUrl != null) {
-      Extensions().addRepo(ItemType.manga, mangaUrl, extType);
+    if (_hasValue(mangaUrl)) {
+      futures.add(manager.addRepo(ItemType.manga, mangaUrl!, extType));
     }
 
-    if (novelUrl != null) {
-      Extensions().addRepo(ItemType.novel, novelUrl, extType);
+    if (_hasValue(novelUrl)) {
+      futures.add(manager.addRepo(ItemType.novel, novelUrl!, extType));
     }
 
-    if (repoUrl != null || mangaUrl != null || novelUrl != null) {
+    if (futures.isEmpty) {
+      snackBar("Missing required parameters in the link.");
+      return;
+    }
+
+    final additions = await Future.wait(futures);
+    if (additions.any((added) => added)) {
       snackBar("Added Repo Links Successfully!");
     } else {
-      snackBar("Missing required parameters in the link.");
+      snackBar("Repositories already added. Nothing new to do.");
     }
+  }
+
+  static bool _hasValue(String? value) => value != null && value.trim().isNotEmpty;
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:anymex/controllers/discord/discord_rpc.dart';
 import 'package:anymex/utils/logger.dart';
@@ -13,6 +14,7 @@ import 'package:dartotsu_extension_bridge/dartotsu_extension_bridge.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:path/path.dart' as p;
 import 'package:preload_page_view/preload_page_view.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
@@ -46,7 +48,22 @@ enum MangaPageViewDirection {
       };
 }
 
+enum DoublePageMode {
+  off,
+  coverFirst,
+  doubleFirst,
+}
+
 class ReaderController extends GetxController with WidgetsBindingObserver {
+  static const Set<String> _supportedImageExtensions = {
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.gif',
+    '.webp',
+    '.bmp'
+  };
+
   late Media media;
   late List<Chapter> chapterList;
   final Rxn<Chapter> currentChapter = Rxn();
@@ -80,6 +97,8 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
   final defaultSpeed = 300.obs;
   RxInt preloadPages = 5.obs;
   RxBool showPageIndicator = false.obs;
+  final Rx<DoublePageMode> doublePageMode = DoublePageMode.off.obs;
+  final RxList<List<PageUrl>> displayPageList = RxList();
 
   final Rx<MangaPageViewMode> readingLayout = MangaPageViewMode.continuous.obs;
   final Rx<MangaPageViewDirection> readingDirection =
@@ -267,6 +286,8 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
         settingsController.preferences.get('preload_pages', defaultValue: 3);
     showPageIndicator.value = settingsController.preferences
         .get('show_page_indicator', defaultValue: false);
+  doublePageMode.value =
+    _getStoredDoublePageModeForMedia() ?? DoublePageMode.off;
   }
 
   void _savePreferences() {
@@ -284,6 +305,47 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
     settingsController.preferences.put('preload_pages', preloadPages.value);
     settingsController.preferences
         .put('show_page_indicator', showPageIndicator.value);
+  }
+
+  String? _doublePagePreferenceKey() {
+    try {
+      final mediaId = media.id;
+      if (mediaId.isEmpty) return null;
+      final service = media.serviceType.name;
+      final contentType = media.mediaType.name;
+      return 'reader_double_page_${contentType}_${service}_$mediaId';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  DoublePageMode? _getStoredDoublePageModeForMedia() {
+    final key = _doublePagePreferenceKey();
+    if (key == null) return null;
+
+    final storedValue = settingsController.preferences.get(key);
+    int? index;
+
+    if (storedValue is int) {
+      index = storedValue;
+    } else if (storedValue is String) {
+      index = int.tryParse(storedValue);
+    }
+
+    if (index == null ||
+        index < 0 ||
+        index >= DoublePageMode.values.length) {
+      settingsController.preferences.delete(key);
+      return null;
+    }
+
+    return DoublePageMode.values[index];
+  }
+
+  void _persistDoublePageModeForMedia(DoublePageMode mode) {
+    final key = _doublePagePreferenceKey();
+    if (key == null) return;
+    settingsController.preferences.put(key, mode.index);
   }
 
   void _setupPositionListener() {
@@ -437,7 +499,23 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
   }
 
   void onPageChanged(int index) async {
-    final number = index + 1;
+    int pageIndex = 0;
+    if (doublePageMode.value == DoublePageMode.off ||
+        readingLayout.value == MangaPageViewMode.continuous) {
+      pageIndex = index;
+    } else {
+      if (doublePageMode.value == DoublePageMode.coverFirst) {
+        if (index == 0) {
+          pageIndex = 0;
+        } else {
+          pageIndex = 1 + (index - 1) * 2;
+        }
+      } else {
+        pageIndex = index * 2;
+      }
+    }
+
+    final number = pageIndex + 1;
     if (!_isValidPageNumber(number)) return;
 
     currentPageIndex.value = number;
@@ -545,11 +623,28 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
 
     currentPageIndex.value = pageNumber;
 
-    if (readingLayout.value == MangaPageViewMode.continuous) {
-      itemScrollController?.jumpTo(index: index);
+    int spreadIndex = 0;
+    if (doublePageMode.value == DoublePageMode.off ||
+        readingLayout.value == MangaPageViewMode.continuous) {
+      spreadIndex = index;
     } else {
-      Logger.i('[PAGE CONTROLLER] Navigating to page $index');
-      pageController?.jumpToPage(index);
+      if (doublePageMode.value == DoublePageMode.coverFirst) {
+        if (index == 0) {
+          spreadIndex = 0;
+        } else {
+          spreadIndex = ((index - 1) ~/ 2) + 1;
+        }
+      } else {
+        spreadIndex = index ~/ 2;
+      }
+    }
+
+    if (readingLayout.value == MangaPageViewMode.continuous) {
+      itemScrollController?.jumpTo(index: spreadIndex);
+    } else {
+      Logger.i(
+          '[PAGE CONTROLLER] Navigating to page $index (spread $spreadIndex)');
+      pageController?.jumpToPage(spreadIndex);
     }
   }
 
@@ -579,24 +674,66 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
     canGoNext.value = index < chapterList.length - 1;
   }
 
+  void _processPages() {
+    if (pageList.isEmpty) {
+      displayPageList.clear();
+      return;
+    }
+
+    if (doublePageMode.value == DoublePageMode.off ||
+        readingLayout.value == MangaPageViewMode.continuous) {
+      displayPageList.value = pageList.map((e) => [e]).toList();
+      return;
+    }
+
+    final List<List<PageUrl>> processed = [];
+    int index = 0;
+
+    if (doublePageMode.value == DoublePageMode.coverFirst) {
+      if (index < pageList.length) {
+        processed.add([pageList[index]]);
+        index++;
+      }
+    }
+
+    while (index < pageList.length) {
+      if (index + 1 < pageList.length) {
+        processed.add([pageList[index], pageList[index + 1]]);
+        index += 2;
+      } else {
+        processed.add([pageList[index]]);
+        index++;
+      }
+    }
+
+    displayPageList.value = processed;
+  }
+
   Future<void> fetchImages(String url) async {
     _isNavigating = true;
     _resetOverscroll();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initTracking());
     currentPageIndex.value = 1;
     _syncAvailability();
-    print('Fetching images for $url');
+    Logger.i('Fetching images for $url');
 
     try {
       loadingState.value = LoadingState.loading;
       pageList.clear();
+      displayPageList.clear();
       errorMessage.value = '';
+
+      final handledOffline = await _tryLoadOfflineChapter(url);
+      if (handledOffline) {
+        return;
+      }
 
       final data = await sourceController.activeMangaSource.value!.methods
           .getPageList(DEpisode(episodeNumber: '1', url: url));
 
       if (data.isNotEmpty) {
         pageList.value = data;
+        _processPages();
         loadingState.value = LoadingState.loaded;
         currentPageIndex.value = 1;
         _safelyUpdateTotalPages(pageList.length);
@@ -633,6 +770,57 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
     }
   }
 
+  Future<bool> _tryLoadOfflineChapter(String url) async {
+    final directoryPath = _resolveOfflineDirectory(url);
+    if (directoryPath == null) return false;
+
+    final dir = Directory(directoryPath);
+    if (!dir.existsSync()) {
+      throw Exception('Offline chapter directory missing: $directoryPath');
+    }
+
+    final files = dir
+        .listSync()
+        .whereType<File>()
+        .where((file) => _supportedImageExtensions
+            .contains(p.extension(file.path).toLowerCase()))
+        .toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+
+    if (files.isEmpty) {
+      throw Exception('No images found in downloaded chapter.');
+    }
+
+    pageList.value = files
+        .map((file) => PageUrl(
+              url: Uri.file(file.path).toString(),
+              headers: const {},
+            ))
+        .toList();
+    _processPages();
+
+    loadingState.value = LoadingState.loaded;
+    currentPageIndex.value = 1;
+    _safelyUpdateTotalPages(pageList.length);
+    return true;
+  }
+
+  String? _resolveOfflineDirectory(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return null;
+
+    if (trimmed.startsWith('file://')) {
+      return Uri.parse(trimmed).toFilePath();
+    }
+
+    final dir = Directory(trimmed);
+    if (dir.existsSync()) {
+      return dir.path;
+    }
+
+    return null;
+  }
+
   void changeReadingLayout(MangaPageViewMode mode) async {
     readingLayout.value = mode;
 
@@ -645,6 +833,13 @@ class ReaderController extends GetxController with WidgetsBindingObserver {
   void changeReadingDirection(MangaPageViewDirection direction) async {
     readingDirection.value = direction;
     savePreferences();
+  }
+
+  void changeDoublePageMode(DoublePageMode mode) {
+    doublePageMode.value = mode;
+    _persistDoublePageModeForMedia(mode);
+    _processPages();
+    navigateToPage(currentPageIndex.value - 1);
   }
 
   void savePreferences() => _savePreferences();

@@ -81,6 +81,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     required Episode episode,
     required List<Episode> episodeList,
     required anymex.Media anilistData,
+    List<model.Track>? subtitleTracks,
   }) {
     final offlineVideo = model.Video(
       videoPath,
@@ -89,7 +90,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       headers: {},
     );
 
-    return PlayerController(
+    final controller = PlayerController(
       offlineVideo,
       episode,
       episodeList,
@@ -100,6 +101,17 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       itemName: itemName,
       offlineVideoPath: videoPath,
     );
+
+    if (subtitleTracks?.isNotEmpty ?? false) {
+      controller.externalSubs.value = subtitleTracks!;
+      final preferredTrack = subtitleTracks.firstWhereOrNull(
+            (track) => track.label?.toLowerCase().contains('eng') ?? false,
+          ) ??
+          subtitleTracks.first;
+      controller.setExternalSub(preferredTrack);
+    }
+
+    return controller;
   }
 
   late Player player;

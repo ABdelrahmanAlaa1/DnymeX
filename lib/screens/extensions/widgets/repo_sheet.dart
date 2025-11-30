@@ -48,13 +48,13 @@ class _RepoBottomSheetState extends State<RepoBottomSheet> {
         : ExtensionType.mangayomi;
 
     animeRepoController = TextEditingController(
-      text: controller.getAnimeRepo(type),
+      text: controller.getAnimeRepo(type).join('\n'),
     );
     mangaRepoController = TextEditingController(
-      text: controller.getMangaRepo(type),
+      text: controller.getMangaRepo(type).join('\n'),
     );
     novelRepoController = TextEditingController(
-      text: controller.activeNovelRepo,
+      text: controller.activeNovelRepo.join('\n'),
     );
   }
 
@@ -74,8 +74,8 @@ class _RepoBottomSheetState extends State<RepoBottomSheet> {
           ? ExtensionType.aniyomi
           : ExtensionType.mangayomi;
 
-      animeRepoController.text = controller.getAnimeRepo(type);
-      mangaRepoController.text = controller.getMangaRepo(type);
+      animeRepoController.text = controller.getAnimeRepo(type).join('\n');
+      mangaRepoController.text = controller.getMangaRepo(type).join('\n');
     });
   }
 
@@ -86,11 +86,24 @@ class _RepoBottomSheetState extends State<RepoBottomSheet> {
 
     print('${type.name} - ${animeRepoController.text}');
 
-    controller.setAnimeRepo(animeRepoController.text, type);
-    controller.setMangaRepo(mangaRepoController.text, type);
+    controller.setAnimeRepo(
+        animeRepoController.text
+            .split('\n')
+            .where((e) => e.isNotEmpty)
+            .toList(),
+        type);
+    controller.setMangaRepo(
+        mangaRepoController.text
+            .split('\n')
+            .where((e) => e.isNotEmpty)
+            .toList(),
+        type);
 
     if (selectedTab == 0) {
-      controller.activeNovelRepo = novelRepoController.text;
+      controller.activeNovelRepo = novelRepoController.text
+          .split('\n')
+          .where((e) => e.isNotEmpty)
+          .toList();
     }
 
     Navigator.of(context).pop();

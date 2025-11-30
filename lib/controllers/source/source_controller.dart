@@ -13,11 +13,13 @@ import 'package:anymex/controllers/services/widgets/widgets_builders.dart';
 import 'package:anymex/models/Media/media.dart';
 import 'package:anymex/models/Service/base_service.dart';
 import 'package:anymex/utils/function.dart';
+import 'package:anymex/utils/repo_list_utils.dart';
 import 'package:anymex/utils/storage_provider.dart';
 import 'package:anymex/widgets/common/search_bar.dart';
 import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:dartotsu_extension_bridge/Aniyomi/AniyomiExtensions.dart';
 import 'package:dartotsu_extension_bridge/Mangayomi/MangayomiExtensions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_progress.dart';
 import 'package:get/get.dart';
@@ -50,63 +52,95 @@ class SourceController extends GetxController implements BaseService {
   final novelSections = <Widget>[].obs;
 
   final isExtensionsServiceAllowed = false.obs;
-  final RxString _activeAnimeRepo = ''.obs;
-  final RxString _activeMangaRepo = ''.obs;
-  final RxString _activeNovelRepo = ''.obs;
-  final RxString _activeAniyomiAnimeRepo = ''.obs;
-  final RxString _activeAniyomiMangaRepo = ''.obs;
+  final RxList<String> _activeAnimeRepo = <String>[].obs;
+  final RxList<String> _activeMangaRepo = <String>[].obs;
+  final RxList<String> _activeNovelRepo = <String>[].obs;
+  final RxList<String> _activeAniyomiAnimeRepo = <String>[].obs;
+  final RxList<String> _activeAniyomiMangaRepo = <String>[].obs;
 
   final RxBool shouldShowExtensions = false.obs;
 
-  String get activeAnimeRepo => _activeAnimeRepo.value;
-  set activeAnimeRepo(String value) {
-    _activeAnimeRepo.value = value;
+  List<String> get activeAnimeRepo => _activeAnimeRepo;
+  set activeAnimeRepo(List<String> value) {
+    _activeAnimeRepo.assignAll(normalizeRepoList(value));
     saveRepoSettings();
   }
 
-  String get activeMangaRepo => _activeMangaRepo.value;
-  set activeMangaRepo(String value) {
-    _activeMangaRepo.value = value;
+  List<String> get activeMangaRepo => _activeMangaRepo;
+  set activeMangaRepo(List<String> value) {
+    _activeMangaRepo.assignAll(normalizeRepoList(value));
     saveRepoSettings();
   }
 
-  String get activeNovelRepo => _activeNovelRepo.value;
-  set activeNovelRepo(String value) {
-    _activeNovelRepo.value = value;
+  List<String> get activeNovelRepo => _activeNovelRepo;
+  set activeNovelRepo(List<String> value) {
+    _activeNovelRepo.assignAll(normalizeRepoList(value));
     saveRepoSettings();
   }
 
-  String get activeAniyomiAnimeRepo => _activeAniyomiAnimeRepo.value;
-  set activeAniyomiAnimeRepo(String value) {
-    _activeAniyomiAnimeRepo.value = value;
+  List<String> get activeAniyomiAnimeRepo => _activeAniyomiAnimeRepo;
+  set activeAniyomiAnimeRepo(List<String> value) {
+    _activeAniyomiAnimeRepo.assignAll(normalizeRepoList(value));
     saveRepoSettings();
   }
 
-  String get activeAniyomiMangaRepo => _activeAniyomiMangaRepo.value;
-  set activeAniyomiMangaRepo(String value) {
-    _activeAniyomiMangaRepo.value = value;
+  List<String> get activeAniyomiMangaRepo => _activeAniyomiMangaRepo;
+  set activeAniyomiMangaRepo(List<String> value) {
+    _activeAniyomiMangaRepo.assignAll(normalizeRepoList(value));
     saveRepoSettings();
   }
 
-  void setAnimeRepo(String val, ExtensionType type) {
-    if (type == ExtensionType.aniyomi) {
-      Logger.i('Settings Aniyomi repo: $val');
-      activeAniyomiAnimeRepo = val;
-    } else {
-      Logger.i('Settings Mangayomi repo: $val');
-      activeAnimeRepo = val;
+  bool appendRepoUrl({
+    required ItemType type,
+    required ExtensionType extensionType,
+    required String repo,
+  }) {
+    final trimmed = repo.trim();
+    if (trimmed.isEmpty) return false;
+
+    switch (type) {
+      case ItemType.anime:
+        final before = List<String>.from(getAnimeRepo(extensionType));
+        final updated = appendRepoEntry(before, trimmed);
+        if (listEquals(before, updated)) return false;
+        setAnimeRepo(updated, extensionType);
+        return true;
+      case ItemType.manga:
+        final before = List<String>.from(getMangaRepo(extensionType));
+        final updated = appendRepoEntry(before, trimmed);
+        if (listEquals(before, updated)) return false;
+        setMangaRepo(updated, extensionType);
+        return true;
+      case ItemType.novel:
+        final before = List<String>.from(activeNovelRepo);
+        final updated = appendRepoEntry(before, trimmed);
+        if (listEquals(before, updated)) return false;
+        activeNovelRepo = updated;
+        return true;
     }
   }
 
-  void setMangaRepo(String val, ExtensionType type) {
+  void setAnimeRepo(List<String> val, ExtensionType type) {
+    final normalized = normalizeRepoList(val);
     if (type == ExtensionType.aniyomi) {
-      activeAniyomiMangaRepo = val;
+      Logger.i('Settings Aniyomi repo: $normalized');
+      activeAniyomiAnimeRepo = normalized;
     } else {
-      activeMangaRepo = val;
+      Logger.i('Settings Mangayomi repo: $normalized');
+      activeAnimeRepo = normalized;
     }
   }
 
-  String getAnimeRepo(ExtensionType type) {
+  void setMangaRepo(List<String> val, ExtensionType type) {
+    final normalized = normalizeRepoList(val);
+    if (type == ExtensionType.aniyomi) {
+      activeAniyomiMangaRepo = normalized;
+    } else {
+      activeMangaRepo = normalized;
+    }
+  }
+
+  List<String> getAnimeRepo(ExtensionType type) {
     if (type == ExtensionType.aniyomi) {
       Logger.i('Getting Aniyomi repo');
       return activeAniyomiAnimeRepo;
@@ -116,7 +150,7 @@ class SourceController extends GetxController implements BaseService {
     }
   }
 
-  String getMangaRepo(ExtensionType type) {
+  List<String> getMangaRepo(ExtensionType type) {
     if (type == ExtensionType.aniyomi) {
       return activeAniyomiMangaRepo;
     } else {
@@ -126,21 +160,21 @@ class SourceController extends GetxController implements BaseService {
 
   void saveRepoSettings() {
     final box = Hive.box('themeData');
-    box.put("activeAnimeRepo", _activeAnimeRepo.value);
-    box.put("activeMangaRepo", _activeMangaRepo.value);
-    box.put("activeNovelRepo", _activeNovelRepo.value);
-    box.put("activeAniyomiAnimeRepo", _activeAniyomiAnimeRepo.value);
-    box.put("activeAniyomiMangaRepo", _activeAniyomiMangaRepo.value);
+    box.put("activeAnimeRepo", _activeAnimeRepo.toList());
+    box.put("activeMangaRepo", _activeMangaRepo.toList());
+    box.put("activeNovelRepo", _activeNovelRepo.toList());
+    box.put("activeAniyomiAnimeRepo", _activeAniyomiAnimeRepo.toList());
+    box.put("activeAniyomiMangaRepo", _activeAniyomiMangaRepo.toList());
     shouldShowExtensions.value = [
-      _activeAnimeRepo.value,
-      _activeAniyomiAnimeRepo.value,
-      _activeMangaRepo.value,
-      _activeAniyomiMangaRepo.value,
-      _activeNovelRepo.value,
+      _activeAnimeRepo,
+      _activeAniyomiAnimeRepo,
+      _activeMangaRepo,
+      _activeAniyomiMangaRepo,
+      _activeNovelRepo,
       installedExtensions,
       installedMangaExtensions,
       installedNovelExtensions,
-    ].any((e) => (e as dynamic).isNotEmpty);
+    ].any((e) => e.isNotEmpty);
   }
 
   @override
@@ -270,24 +304,58 @@ class SourceController extends GetxController implements BaseService {
       activeMangaSource.value ??= installedMangaExtensions.firstOrNull;
       activeNovelSource.value ??= installedNovelExtensions.firstOrNull;
 
-      _activeAnimeRepo.value = box.get("activeAnimeRepo", defaultValue: '');
-      _activeMangaRepo.value = box.get("activeMangaRepo", defaultValue: '');
-      _activeNovelRepo.value = box.get("activeNovelRepo", defaultValue: '');
-      _activeAniyomiAnimeRepo.value =
-          box.get("activeAniyomiAnimeRepo", defaultValue: '');
-      _activeAniyomiMangaRepo.value =
-          box.get("activeAniyomiMangaRepo", defaultValue: '');
+      var animeRepo = box.get("activeAnimeRepo");
+      if (animeRepo is String && animeRepo.isNotEmpty) {
+        _activeAnimeRepo.assignAll(normalizeRepoList([animeRepo]));
+      } else if (animeRepo is List) {
+        _activeAnimeRepo
+            .assignAll(normalizeRepoList(animeRepo.cast<String>()));
+      }
+
+      var mangaRepo = box.get("activeMangaRepo");
+      if (mangaRepo is String && mangaRepo.isNotEmpty) {
+        _activeMangaRepo.assignAll(normalizeRepoList([mangaRepo]));
+      } else if (mangaRepo is List) {
+        _activeMangaRepo
+            .assignAll(normalizeRepoList(mangaRepo.cast<String>()));
+      }
+
+      var novelRepo = box.get("activeNovelRepo");
+      if (novelRepo is String && novelRepo.isNotEmpty) {
+        _activeNovelRepo.assignAll(normalizeRepoList([novelRepo]));
+      } else if (novelRepo is List) {
+        _activeNovelRepo
+            .assignAll(normalizeRepoList(novelRepo.cast<String>()));
+      }
+
+      var aniyomiAnimeRepo = box.get("activeAniyomiAnimeRepo");
+      if (aniyomiAnimeRepo is String && aniyomiAnimeRepo.isNotEmpty) {
+        _activeAniyomiAnimeRepo
+            .assignAll(normalizeRepoList([aniyomiAnimeRepo]));
+      } else if (aniyomiAnimeRepo is List) {
+        _activeAniyomiAnimeRepo
+            .assignAll(normalizeRepoList(aniyomiAnimeRepo.cast<String>()));
+      }
+
+      var aniyomiMangaRepo = box.get("activeAniyomiMangaRepo");
+      if (aniyomiMangaRepo is String && aniyomiMangaRepo.isNotEmpty) {
+        _activeAniyomiMangaRepo
+            .assignAll(normalizeRepoList([aniyomiMangaRepo]));
+      } else if (aniyomiMangaRepo is List) {
+        _activeAniyomiMangaRepo
+            .assignAll(normalizeRepoList(aniyomiMangaRepo.cast<String>()));
+      }
 
       shouldShowExtensions.value = [
-        _activeAnimeRepo.value,
-        _activeAniyomiAnimeRepo.value,
-        _activeMangaRepo.value,
-        _activeAniyomiMangaRepo.value,
-        _activeNovelRepo.value,
+        _activeAnimeRepo,
+        _activeAniyomiAnimeRepo,
+        _activeMangaRepo,
+        _activeAniyomiMangaRepo,
+        _activeNovelRepo,
         installedExtensions,
         installedMangaExtensions,
         installedNovelExtensions,
-      ].any((e) => (e as dynamic).isNotEmpty);
+      ].any((e) => e.isNotEmpty);
 
       Logger.i('Extensions initialized.');
     } catch (e) {
@@ -443,13 +511,13 @@ class SourceController extends GetxController implements BaseService {
     for (var type in extenionTypes) {
       await type
           .getManager()
-          .fetchAvailableAnimeExtensions([getAnimeRepo(type)]);
+          .fetchAvailableAnimeExtensions(getAnimeRepo(type));
       await type
           .getManager()
-          .fetchAvailableMangaExtensions([getMangaRepo(type)]);
-      await type.getManager().fetchAvailableNovelExtensions([
+          .fetchAvailableMangaExtensions(getMangaRepo(type));
+      await type.getManager().fetchAvailableNovelExtensions(
         activeNovelRepo,
-      ]);
+      );
     }
     await initExtensions();
   }

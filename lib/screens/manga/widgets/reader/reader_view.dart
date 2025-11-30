@@ -281,13 +281,13 @@ class _ReaderViewState extends State<ReaderView> with TickerProviderStateMixin {
   }
 
   Widget _buildContinuousView() {
-    return ScrollablePositionedList.builder(
-      itemCount: widget.controller.pageList.length,
+    return Obx(() => ScrollablePositionedList.builder(
+      itemCount: widget.controller.displayPageList.length,
       itemScrollController: widget.controller.itemScrollController,
       itemPositionsListener: widget.controller.itemPositionsListener,
       scrollOffsetListener: widget.controller.scrollOffsetListener,
       initialScrollIndex: (widget.controller.currentPageIndex.value - 1)
-          .clamp(0, widget.controller.pageList.length - 1),
+          .clamp(0, widget.controller.displayPageList.length - 1),
       physics: const ClampingScrollPhysics(),
       scrollDirection: widget.controller.readingDirection.value.axis,
       reverse: widget.controller.readingDirection.value.reversed,
@@ -295,18 +295,18 @@ class _ReaderViewState extends State<ReaderView> with TickerProviderStateMixin {
         if (!Platform.isAndroid && !Platform.isIOS) {
           return Column(
             children: [
-              _buildImage(context, widget.controller.pageList[index], index),
+              _buildImage(context, widget.controller.displayPageList[index], index),
             ],
           );
         }
-        return _buildImage(context, widget.controller.pageList[index], index);
+        return _buildImage(context, widget.controller.displayPageList[index], index);
       },
-    );
+    ));
   }
 
   Widget _buildPagedView() {
-    return PreloadPageView.builder(
-      itemCount: widget.controller.pageList.length,
+    return Obx(() => PreloadPageView.builder(
+      itemCount: widget.controller.displayPageList.length,
       controller: widget.controller.pageController,
       preloadPagesCount: widget.controller.preloadPages.value,
       physics: const ClampingScrollPhysics(),
@@ -315,199 +315,221 @@ class _ReaderViewState extends State<ReaderView> with TickerProviderStateMixin {
       onPageChanged: widget.controller.onPageChanged,
       itemBuilder: (context, index) {
         return _buildImageForPaged(
-            context, widget.controller.pageList[index], index);
+            context, widget.controller.displayPageList[index], index);
       },
+    ));
+  }
+
+  Widget _buildImage(BuildContext context, List<PageUrl> pages, int index) {
+    final size = MediaQuery.of(context).size;
+    final page = pages.first;
+
+    return Obx(() {
+      final maxWidth = 500 * widget.controller.pageWidthMultiplier.value;
+      final isSpaced = widget.controller.spacedPages.value;
+
+      return Padding(
+        padding: isSpaced
+            ? const EdgeInsets.symmetric(vertical: 10.0)
+            : EdgeInsets.zero,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: _buildPageImage(
+              page: page,
+              index: index,
+              viewportSize: size,
+              expandToViewport: false,
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _buildImageForPaged(BuildContext context, List<PageUrl> pages, int index) {
+    final size = MediaQuery.of(context).size;
+    return Obx(() {
+      final isSpaced = widget.controller.spacedPages.value;
+      Widget content;
+
+      if (pages.length == 1) {
+        content = Center(
+          child: _buildPageImage(
+            page: pages.first,
+            index: index,
+            viewportSize: size,
+            expandToViewport: true,
+          ),
+        );
+      } else {
+        final children = pages
+            .map((page) => Expanded(
+                  child: _buildPageImage(
+                    page: page,
+                    index: index,
+                    viewportSize: size,
+                    expandToViewport: true,
+                  ),
+                ))
+            .toList();
+
+        final isReversed = widget.controller.readingDirection.value.reversed;
+        content = Row(
+          children: isReversed ? children.reversed.toList() : children,
+        );
+      }
+
+      if (isSpaced) {
+        return Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: content,
+        );
+      }
+      return content;
+    });
+  }
+
+  Widget _buildPageImage({
+    required PageUrl page,
+    required int index,
+    required Size viewportSize,
+    required bool expandToViewport,
+  }) {
+    final localPath = _resolveLocalPath(page.url);
+    final headers = (page.headers?.isEmpty ?? true)
+        ? {'Referer': sourceController.activeMangaSource.value?.baseUrl ?? ''}
+        : page.headers;
+
+    Widget loadStateBuilder(ExtendedImageState state) {
+      return _buildLoadStateWidget(
+        state,
+        viewportSize,
+        index,
+        expandToViewport: expandToViewport,
+      );
+    }
+
+    if (localPath != null) {
+      final file = File(localPath);
+      return ExtendedImage.file(
+        file,
+        fit: BoxFit.contain,
+        mode: ExtendedImageMode.none,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        enableLoadState: true,
+        loadStateChanged: loadStateBuilder,
+      );
+    }
+
+    return ExtendedImage.network(
+      page.url,
+      cacheMaxAge: Duration(
+          days:
+              settingsController.preferences.get('cache_days', defaultValue: 7)),
+      mode: ExtendedImageMode.none,
+      gaplessPlayback: true,
+      cache: true,
+      headers: headers,
+      fit: BoxFit.contain,
+      alignment: Alignment.center,
+      filterQuality: FilterQuality.medium,
+      enableLoadState: true,
+      loadStateChanged: loadStateBuilder,
+    );
+  }
+      mode: ExtendedImageMode.none,
+      gaplessPlayback: true,
+      cache: true,
+      headers: headers,
+      fit: BoxFit.contain,
+      alignment: Alignment.center,
+      filterQuality: FilterQuality.medium,
+      enableLoadState: true,
+      loadStateChanged: loadStateBuilder,
     );
   }
 
-  Widget _buildImage(BuildContext context, PageUrl page, int index) {
-    final size = MediaQuery.of(context).size;
+  Widget _buildLoadStateWidget(
+    ExtendedImageState state,
+    Size viewportSize,
+    int index, {
+    required bool expandToViewport,
+  }) {
+    final height = expandToViewport ? viewportSize.height : 200.0;
+    final width = viewportSize.width;
 
-    return Obx(() {
-      return Container(
-        padding: EdgeInsets.symmetric(
-            vertical: widget.controller.spacedPages.value ? 8.0 : 0),
-        child: ExtendedImage.network(
-          page.url,
-          cacheMaxAge: Duration(
-              days: settingsController.preferences
-                  .get('cache_days', defaultValue: 7)),
-          mode: ExtendedImageMode.none,
-          gaplessPlayback: true,
-          cache: true,
-          headers: (page.headers?.isEmpty ?? true)
-              ? {
-                  'Referer':
-                      sourceController.activeMangaSource.value?.baseUrl ?? ''
-                }
-              : page.headers,
-          fit: BoxFit.contain,
-          alignment: Alignment.center,
-          constraints: BoxConstraints(
-            maxWidth: 500 * widget.controller.pageWidthMultiplier.value,
+    switch (state.extendedImageLoadState) {
+      case LoadState.loading:
+        final progress = (state.loadingProgress?.cumulativeBytesLoaded ?? 0) /
+            (state.loadingProgress?.expectedTotalBytes ?? 1).toDouble();
+        return SizedBox(
+          width: width,
+          height: height,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnymexProgressIndicator(value: progress),
+                const SizedBox(height: 8),
+                Text('Loading page ${index + 1}...'),
+              ],
+            ),
           ),
-          filterQuality: FilterQuality.medium,
-          enableLoadState: true,
-          loadStateChanged: (ExtendedImageState state) {
-            switch (state.extendedImageLoadState) {
-              case LoadState.loading:
-                final progress =
-                    (state.loadingProgress?.cumulativeBytesLoaded ?? 0) /
-                        (state.loadingProgress?.expectedTotalBytes ?? 1)
-                            .toDouble();
-                return SizedBox(
-                  width: size.width,
-                  height: 200,
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        AnymexProgressIndicator(
-                          value: progress,
-                        ),
-                        const SizedBox(height: 8),
-                        Text('Loading page ${index + 1}...'),
-                      ],
-                    ),
-                  ),
-                );
+        );
 
-              case LoadState.failed:
-                return Container(
-                  width: size.width,
-                  height: 200,
-                  color: Colors.grey.withOpacity(0.1),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.broken_image_outlined,
-                        size: 48,
-                        color: Colors.grey.withOpacity(0.7),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Failed to load page ${index + 1}',
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                      const SizedBox(height: 8),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          state.reLoadImage();
-                          Logger.i(state.completedWidget.toString());
-                        },
-                        icon: const Icon(Icons.refresh, size: 16),
-                        label: const Text('Retry'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          textStyle: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
+      case LoadState.failed:
+        return Container(
+          width: width,
+          height: height,
+          color: Colors.grey.withOpacity(0.1),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.broken_image_outlined,
+                size: 48,
+                color: Colors.grey.withOpacity(0.7),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Failed to load page ${index + 1}',
+                style: const TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: () => state.reLoadImage(),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        );
 
-              case LoadState.completed:
-                return state.completedWidget;
-            }
-          },
-        ),
-      );
-    });
+      case LoadState.completed:
+        return state.completedWidget;
+    }
   }
 
-  Widget _buildImageForPaged(BuildContext context, PageUrl page, int index) {
-    final size = MediaQuery.of(context).size;
+  String? _resolveLocalPath(String url) {
+    if (url.isEmpty) return null;
 
-    return Obx(() {
-      return Padding(
-        padding: EdgeInsets.symmetric(
-            vertical: widget.controller.spacedPages.value ? 8.0 : 0),
-        child: Center(
-          child: ExtendedImage.network(
-            page.url,
-            cacheMaxAge: Duration(
-                days: settingsController.preferences
-                    .get('cache_days', defaultValue: 7)),
-            mode: ExtendedImageMode.none,
-            gaplessPlayback: true,
-            headers: (page.headers?.isEmpty ?? true)
-                ? {
-                    'Referer':
-                        sourceController.activeMangaSource.value?.baseUrl ?? ''
-                  }
-                : page.headers,
-            fit: BoxFit.contain,
-            cache: true,
-            alignment: Alignment.center,
-            filterQuality: FilterQuality.medium,
-            enableLoadState: true,
-            loadStateChanged: (ExtendedImageState state) {
-              switch (state.extendedImageLoadState) {
-                case LoadState.loading:
-                  final progress =
-                      (state.loadingProgress?.cumulativeBytesLoaded ?? 0) /
-                          (state.loadingProgress?.expectedTotalBytes ?? 1)
-                              .toDouble();
-                  return SizedBox.fromSize(
-                    size: Size(size.width, size.height),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          AnymexProgressIndicator(value: progress),
-                          const SizedBox(height: 8),
-                          Text('Loading page ${index + 1}...'),
-                        ],
-                      ),
-                    ),
-                  );
+    final uri = Uri.tryParse(url);
+    if (uri != null && uri.scheme == 'file') {
+      return uri.toFilePath();
+    }
 
-                case LoadState.failed:
-                  return SizedBox.fromSize(
-                    size: Size(size.width, size.height),
-                    child: Container(
-                      color: Colors.grey.withOpacity(0.1),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.broken_image_outlined,
-                            size: 48,
-                            color: Colors.grey.withOpacity(0.7),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Failed to load page ${index + 1}',
-                            style: const TextStyle(color: Colors.grey),
-                          ),
-                          const SizedBox(height: 8),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              state.reLoadImage();
-                              Logger.i(state.completedWidget.toString());
-                            },
-                            icon: const Icon(Icons.refresh, size: 16),
-                            label: const Text('Retry'),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
-                              textStyle: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
+    final file = File(url);
+    if (file.existsSync()) {
+      return file.path;
+    }
 
-                case LoadState.completed:
-                  return state.completedWidget;
-              }
-            },
-          ),
-        ),
-      );
-    });
+    return null;
   }
 }

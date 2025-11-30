@@ -11,7 +11,6 @@ import 'package:anymex/screens/manga/reading_page.dart';
 import 'package:anymex/screens/manga/widgets/chapter_ranges.dart';
 import 'package:anymex/screens/manga/widgets/scanlators_ranges.dart';
 import 'package:anymex/screens/manga/widgets/track_dialog.dart';
-import 'package:anymex/screens/manga/widgets/downloaded_reader_page.dart';
 import 'package:anymex/utils/function.dart';
 import 'package:anymex/utils/string_extensions.dart';
 import 'package:anymex/widgets/common/glow.dart';
@@ -409,42 +408,73 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
     ChapterState chapterState,
     Map<double, DownloadedChapter> downloadedMap,
   ) {
-    final downloadEntry = downloadedMap[chapter.number ?? 0];
-    final isDownloaded = downloadEntry != null;
-    final isDownloading = _downloadController.isChapterDownloading(
-      widget.anilistData.id,
-      chapter.number,
-    );
+    return Obx(() {
+      final downloadEntry = downloadedMap[chapter.number ?? 0];
+      final isDownloaded = downloadEntry != null;
+      final isDownloading = _downloadController.isChapterDownloading(
+        widget.anilistData.id,
+        chapter.number,
+      );
+      final downloadProgress = _downloadController.getChapterProgress(
+        widget.anilistData.id,
+        chapter.number,
+      );
 
-    void handleTap() {
-      if (widget.showingDownloaded && downloadEntry != null) {
-        _openDownloadedChapter(downloadEntry);
-      } else {
-        _chapterService.navigateToReading(
-            widget.anilistData, filteredFullChapters, chapter, context);
+      void handleTap() {
+        if (widget.showingDownloaded && downloadEntry != null) {
+          _openDownloadedChapter(downloadEntry);
+        } else {
+          _chapterService.navigateToReading(
+              widget.anilistData, filteredFullChapters, chapter, context);
+        }
       }
-    }
 
-    return ChapterListItem(
-      chapter: chapter,
-      anilistData: widget.anilistData,
-      readChapter: chapterState.readChapter,
-      continueChapter: chapterState.continueChapter,
-      onTap: handleTap,
-      isDownloaded: isDownloaded,
-      isDownloading: isDownloading,
-      showingDownloaded: widget.showingDownloaded,
-      onDownloadTap: () => _downloadController.downloadChapter(
-        media: widget.anilistData,
+      return ChapterListItem(
         chapter: chapter,
-      ),
-    );
+        anilistData: widget.anilistData,
+        readChapter: chapterState.readChapter,
+        continueChapter: chapterState.continueChapter,
+        onTap: handleTap,
+        isDownloaded: isDownloaded,
+        isDownloading: isDownloading,
+        downloadProgress: downloadProgress,
+        showingDownloaded: widget.showingDownloaded,
+        onDownloadTap: () => _downloadController.downloadChapter(
+          media: widget.anilistData,
+          chapter: chapter,
+        ),
+      );
+    });
   }
 
   void _openDownloadedChapter(DownloadedChapter chapter) {
-    navigate(() => DownloadedReaderPage(
-          media: widget.anilistData,
-          chapter: chapter,
+    final chapterModels = (widget.chapters ?? [])
+        .where((entry) => entry.link?.isNotEmpty ?? false)
+        .toList();
+
+    Chapter current = chapterModels.firstWhere(
+      (entry) =>
+          entry.link == chapter.directory.path &&
+          (entry.number == chapter.chapterNumber),
+      orElse: () => Chapter(
+        title: chapter.title ?? 'Chapter ${chapter.chapterNumber}',
+        number: chapter.chapterNumber,
+        link: chapter.directory.path,
+        sourceName: DownloadController.downloadedSourceLabel,
+      ),
+    );
+
+    if (!chapterModels.contains(current)) {
+      chapterModels.add(current);
+      chapterModels.sort((a, b) =>
+          (a.number ?? 0).compareTo((b.number ?? 0)));
+    }
+
+    navigate(() => ReadingPage(
+          anilistData: widget.anilistData,
+          chapterList: chapterModels,
+          currentChapter: current,
+          shouldTrack: false,
         ));
   }
 }
@@ -459,6 +489,7 @@ class ChapterListItem extends StatelessWidget {
   final bool isDownloaded;
   final bool isDownloading;
   final bool showingDownloaded;
+  final double? downloadProgress;
 
   const ChapterListItem({
     super.key,
@@ -471,6 +502,7 @@ class ChapterListItem extends StatelessWidget {
     this.isDownloaded = false,
     this.isDownloading = false,
     this.showingDownloaded = false,
+    this.downloadProgress,
   });
 
   @override
@@ -502,8 +534,8 @@ class ChapterListItem extends StatelessWidget {
             children: [
               _buildChapterProgress(context, savedChaps ?? Chapter()),
               const SizedBox(width: 15),
-              _buildChapterInfo(context, savedChaps),
-              const Spacer(),
+              Expanded(child: _buildChapterInfo(context, savedChaps)),
+              const SizedBox(width: 10),
               _buildActionButtons(context),
             ],
           ),
@@ -587,28 +619,21 @@ class ChapterListItem extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        SizedBox(
-          width: getResponsiveSize(context,
-              mobileSize: Get.width * 0.4, desktopSize: 200),
-          child: AnymexText(
-            text: '${chapter.title}$progressText',
-            variant: TextVariant.semiBold,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+        AnymexText(
+          text: '${chapter.title}$progressText',
+          variant: TextVariant.semiBold,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 5),
-        SizedBox(
-          width: getResponsiveSize(context,
-              mobileSize: Get.width * 0.4, desktopSize: 200),
-          child: AnymexText(
-            text:
-                '${chapter.releaseDate} • ${Get.find<SourceController>().activeMangaSource.value!.name}',
-            color:
-                Theme.of(context).colorScheme.inverseSurface.withOpacity(0.9),
-            fontStyle: FontStyle.italic,
-            maxLines: 2,
-          ),
+        AnymexText(
+          text:
+              '${chapter.releaseDate} • ${Get.find<SourceController>().activeMangaSource.value!.name}',
+          color:
+              Theme.of(context).colorScheme.inverseSurface.withOpacity(0.9),
+          fontStyle: FontStyle.italic,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
@@ -624,14 +649,17 @@ class ChapterListItem extends StatelessWidget {
       );
     }
 
+    final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         _primaryButton(
           context,
-          label: 'Read',
+          label: isPortrait ? '' : 'Read',
           icon: Icons.menu_book_rounded,
           onPressed: onTap,
+          isIconOnly: isPortrait,
         ),
         const SizedBox(width: 8),
         _downloadButton(context),
@@ -642,13 +670,14 @@ class ChapterListItem extends StatelessWidget {
   Widget _primaryButton(BuildContext context,
       {required String label,
       required IconData icon,
-      required VoidCallback onPressed}) {
+      required VoidCallback onPressed,
+      bool isIconOnly = false}) {
     return Container(
       decoration: BoxDecoration(boxShadow: [glowingShadow(context)]),
       child: AnymexButton(
         onTap: onPressed,
         radius: 12,
-        width: 110,
+        width: isIconOnly ? 40 : 110,
         height: 40,
         color: Theme.of(context).colorScheme.primary,
         child: Row(
@@ -659,12 +688,14 @@ class ChapterListItem extends StatelessWidget {
               color: Theme.of(context).colorScheme.onPrimary,
               size: 18,
             ),
-            const SizedBox(width: 6),
-            AnymexText(
-              text: label,
-              variant: TextVariant.semiBold,
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
+            if (!isIconOnly) ...[
+              const SizedBox(width: 6),
+              AnymexText(
+                text: label,
+                variant: TextVariant.semiBold,
+                color: Theme.of(context).colorScheme.onPrimary,
+              ),
+            ],
           ],
         ),
       ),
@@ -687,6 +718,7 @@ class ChapterListItem extends StatelessWidget {
         width: 36,
         height: 36,
         child: CircularProgressIndicator(
+          value: downloadProgress,
           strokeWidth: 2.5,
           color: Theme.of(context).colorScheme.primary,
         ),

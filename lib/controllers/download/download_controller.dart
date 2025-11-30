@@ -9,16 +9,21 @@ import 'package:dartotsu_extension_bridge/Models/Source.dart';
 import 'package:anymex/utils/logger.dart';
 import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:dartotsu_extension_bridge/Models/DEpisode.dart';
+import 'package:dartotsu_extension_bridge/Models/Subtitle.dart';
 import 'package:dartotsu_extension_bridge/Models/Video.dart';
 import 'package:dartotsu_extension_bridge/dartotsu_extension_bridge.dart';
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:extended_image/extended_image.dart';
 
 class DownloadController extends GetxController {
   static const String downloadedSourceValue = '__anymex_downloaded__';
   static const String downloadedSourceLabel = 'Downloaded';
+  static const int _fullChapterCaptureThreshold = 2;
+  static const String _fallbackUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
 
   DownloadController() {
     _baseDirFuture = _prepareBaseDirectory();
@@ -34,7 +39,44 @@ class DownloadController extends GetxController {
   late final Future<Directory> _baseDirFuture;
 
   final RxMap<String, double> _progress = <String, double>{}.obs;
-  Map<String, double> get progress => _progress;
+  RxMap<String, double> get progress => _progress;
+
+  final RxMap<String, DownloadProgressContext> _progressContexts =
+      <String, DownloadProgressContext>{}.obs;
+  RxMap<String, DownloadProgressContext> get progressContexts => _progressContexts;
+
+  double? getEpisodeProgress(String mediaId, String episodeNumber) {
+    return _progress[_downloadKey(
+        type: ItemType.anime, mediaId: mediaId, number: _episodeKeyValue(episodeNumber))];
+  }
+
+  double? getChapterProgress(String mediaId, num? chapterNumber) {
+    if (chapterNumber == null) return null;
+    return _progress[
+        _downloadKey(type: ItemType.manga, mediaId: mediaId, number: chapterNumber)];
+  }
+
+  void _updateProgress(String key, double value) {
+    _progress[key] = value.clamp(0.0, 1.0);
+    _progress.refresh();
+  }
+
+  void _clearProgress(String key) {
+    if (_progress.remove(key) != null) {
+      _progress.refresh();
+    }
+  }
+
+  void _registerContext(String key, DownloadProgressContext context) {
+    _progressContexts[key] = context;
+    _progressContexts.refresh();
+  }
+
+  void _removeContext(String key) {
+    if (_progressContexts.remove(key) != null) {
+      _progressContexts.refresh();
+    }
+  }
 
   final Rx<Set<String>> _activeDownloads = Rx<Set<String>>({});
   Set<String> get activeDownloads => _activeDownloads.value;
@@ -209,15 +251,46 @@ class DownloadController extends GetxController {
         return;
       }
 
-      final fileNames = <String>[];
-      for (var i = 0; i < pageList.length; i++) {
-        final page = pageList[i];
-        final ext = _inferExtension(page.url);
-        final fileName = '${(i + 1).toString().padLeft(3, '0')}$ext';
-        final file = File(p.join(dir.path, fileName));
-        await _downloadBinary(page.url, file, headers: page.headers);
-        fileNames.add(fileName);
+      final pageTasks = _buildChapterTasks(pageList, dir);
+      final failedTasks = <_ChapterPageTask>[];
+      _updateProgress(trackingKey, 0.0);
+
+      for (final task in pageTasks) {
+        final success = await _attemptPrimaryPageDownload(task, trackingKey);
+        if (!success) {
+          Logger.i('Queued page ${task.index + 1} for fallback capture.');
+          failedTasks.add(task);
+        }
       }
+
+      if (failedTasks.isNotEmpty) {
+        Logger.i('Detected ${failedTasks.length} failed page(s). Initiating fallback.');
+        var pendingFailures = failedTasks;
+
+        if (pendingFailures.length < _fullChapterCaptureThreshold) {
+          pendingFailures = await _retryFailedPagesWithCache(
+            pendingFailures,
+            trackingKey,
+          );
+        }
+
+        if (pendingFailures.isNotEmpty) {
+          final captureSucceeded = await _performFullChapterCapture(
+            tasks: pageTasks,
+            trackingKey: trackingKey,
+          );
+
+          if (!captureSucceeded) {
+            throw Exception(
+                'Unable to capture ${pendingFailures.length} page(s) even after full-chapter fallback.');
+          }
+
+          pendingFailures = [];
+        }
+      }
+
+      final fileNames = pageTasks.map((task) => task.fileName).toList();
+      _updateProgress(trackingKey, 1.0);
 
       final metadata = {
         'type': 'manga',
@@ -237,14 +310,63 @@ class DownloadController extends GetxController {
       errorSnackBar('Failed to download chapter: $e');
       Logger.i(stackTrace.toString());
     } finally {
+      _clearProgress(trackingKey);
       _removeActiveDownload(trackingKey);
     }
+  }
+
+  Future<void> _downloadImageWithStrategies(
+    String url,
+    File targetFile, {
+    Map<String, String>? headers,
+  }) async {
+    int retries = 0;
+    const maxRetries = 3;
+    
+    while (retries < maxRetries) {
+      try {
+        // Strategy 1: Direct Dio
+        await _downloadBinary(url, targetFile, headers: headers);
+        return;
+      } catch (e) {
+        Logger.i('Strategy 1 (Dio) failed for $url: $e');
+      }
+
+      try {
+        // Strategy 2: Dio with User-Agent
+        final newHeaders = Map<String, String>.from(headers ?? {});
+        if (!newHeaders.containsKey('User-Agent')) {
+          newHeaders['User-Agent'] = _fallbackUserAgent;
+        }
+        await _downloadBinary(url, targetFile, headers: newHeaders);
+        return;
+      } catch (e) {
+        Logger.i('Strategy 2 (UA) failed for $url: $e');
+      }
+
+      try {
+        // Strategy 3: ExtendedNetworkImageProvider (Preload)
+        final file = await getNetworkImageFile(url, headers: headers);
+        await file.copy(targetFile.path);
+        return;
+      } catch (e) {
+        Logger.i('Strategy 3 (ExtendedImage) failed for $url: $e');
+      }
+
+      retries++;
+      if (retries < maxRetries) {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+    }
+    
+    throw Exception('Failed to download image after $maxRetries attempts and multiple strategies');
   }
 
   Future<void> downloadEpisode({
     required Media media,
     required hive.Episode episode,
     Source? source,
+    Video? selectedVideo,
   }) async {
     final trackingKey = _downloadKey(
       type: ItemType.anime,
@@ -252,6 +374,17 @@ class DownloadController extends GetxController {
       number: _episodeKeyValue(episode.number),
     );
     _addActiveDownload(trackingKey);
+    _registerContext(
+      trackingKey,
+      DownloadProgressContext(
+        type: ItemType.anime,
+        mediaId: media.id,
+        mediaTitle: media.title.isNotEmpty ? media.title : media.romajiTitle,
+        episodeNumber: episode.number,
+        episodeTitle: episode.title,
+      ),
+    );
+    _updateProgress(trackingKey, 0.0);
     try {
       final link = episode.link;
       if (link == null || link.isEmpty) {
@@ -273,22 +406,55 @@ class DownloadController extends GetxController {
         return;
       }
 
-      successSnackBar('Fetching streams for episode ${episode.number}');
-      final videos = await activeSource.methods
-          .getVideoList(DEpisode(episodeNumber: episode.number, url: link));
-      if (videos.isEmpty) {
-        errorSnackBar('Source returned no streams.');
-        return;
+      successSnackBar('Preparing streams for episode ${episode.number}');
+      Video selected;
+      if (selectedVideo != null) {
+        selected = selectedVideo;
+      } else {
+        final videos = await activeSource.methods
+            .getVideoList(DEpisode(episodeNumber: episode.number, url: link));
+        if (videos.isEmpty) {
+          errorSnackBar('Source returned no streams.');
+          return;
+        }
+        selected = _selectBestVideo(videos);
       }
-
-      final selected = _selectBestVideo(videos);
       final extension = _inferExtension(selected.url, fallback: '.mp4');
       final target = File(p.join(dir.path, 'episode$extension'));
 
       if (_isM3u8(selected.url)) {
-        await _downloadHlsPlaylist(selected.url, dir, headers: selected.headers);
+        await _downloadHlsPlaylist(
+          selected.url,
+          dir,
+          headers: selected.headers,
+          progressKey: trackingKey,
+        );
       } else {
-        await _downloadBinary(selected.url, target, headers: selected.headers);
+        await _downloadBinary(
+          selected.url,
+          target,
+          headers: selected.headers,
+          onProgress: (received, total) {
+            if (total == -1) return;
+            _updateProgress(trackingKey, received / total);
+          },
+        );
+        _updateProgress(trackingKey, 1.0);
+      }
+
+      final subtitleEntries = <DownloadedSubtitle>[];
+      try {
+        final subtitle = await _downloadPreferredSubtitle(
+          video: selected,
+          targetDir: dir,
+          preferredLanguage: activeSource.lang,
+        );
+        if (subtitle != null) {
+          subtitleEntries.add(subtitle);
+        }
+      } catch (e, stackTrace) {
+        Logger.i('Failed to download subtitle: $e');
+        Logger.i(stackTrace.toString());
       }
 
       final metadata = {
@@ -301,6 +467,7 @@ class DownloadController extends GetxController {
         'quality': selected.title ?? selected.quality ?? '',
         'downloadedAt': DateTime.now().toIso8601String(),
         'source': activeSource.name,
+        'subtitles': subtitleEntries.map((entry) => entry.toJson()).toList(),
       };
       await metaFile.writeAsString(jsonEncode(metadata));
       successSnackBar('Episode saved for offline playback.');
@@ -309,6 +476,8 @@ class DownloadController extends GetxController {
       errorSnackBar('Failed to download episode: $e');
       Logger.i(stackTrace.toString());
     } finally {
+      _clearProgress(trackingKey);
+      _removeContext(trackingKey);
       _removeActiveDownload(trackingKey);
     }
   }
@@ -406,6 +575,19 @@ class DownloadController extends GetxController {
         final mediaId = meta['mediaId']?.toString() ?? '';
         if (mediaId.isEmpty) continue;
         if (filterMediaId != null && mediaId != filterMediaId) continue;
+        final subtitles = (meta['subtitles'] as List<dynamic>? ?? const [])
+            .map((entry) {
+              if (entry is Map<String, dynamic>) {
+                return DownloadedSubtitle.fromJson(entry);
+              }
+              if (entry is Map) {
+                return DownloadedSubtitle.fromJson(
+                    entry.map((key, value) => MapEntry(key.toString(), value)));
+              }
+              return null;
+            })
+            .whereType<DownloadedSubtitle>()
+            .toList();
         results.add(DownloadedEpisode(
           directory: dir,
           mediaId: mediaId,
@@ -413,6 +595,7 @@ class DownloadController extends GetxController {
           filePath: meta['file']?.toString(),
           episodeNumber: meta['episodeNumber']?.toString() ?? '0',
           title: meta['episodeTitle']?.toString(),
+          subtitles: subtitles,
           sizeBytes: _calculateDirectorySize(dir),
         ));
       } catch (_) {
@@ -464,8 +647,112 @@ class DownloadController extends GetxController {
     }
   }
 
+  List<_ChapterPageTask> _buildChapterTasks(
+      List<PageUrl> pageList, Directory targetDir) {
+    return List.generate(pageList.length, (index) {
+      final page = pageList[index];
+      final ext = _inferExtension(page.url);
+      final fileName = '${(index + 1).toString().padLeft(3, '0')}$ext';
+      final file = File(p.join(targetDir.path, fileName));
+      return _ChapterPageTask(
+        page: page,
+        targetFile: file,
+        index: index,
+        totalPages: pageList.length,
+        fileName: fileName,
+      );
+    });
+  }
+
+  Future<bool> _attemptPrimaryPageDownload(
+      _ChapterPageTask task, String trackingKey) async {
+    try {
+      await _downloadImageWithStrategies(
+        task.page.url,
+        task.targetFile,
+        headers: task.page.headers,
+      );
+      return true;
+    } catch (e, stackTrace) {
+      Logger.i('Primary download failed for page ${task.index + 1}: $e');
+      Logger.i(stackTrace.toString());
+      return false;
+    } finally {
+      _updateProgress(trackingKey, (task.index + 1) / task.totalPages);
+    }
+  }
+
+  Future<List<_ChapterPageTask>> _retryFailedPagesWithCache(
+      List<_ChapterPageTask> failedPages, String trackingKey) async {
+    if (failedPages.isEmpty) return failedPages;
+    infoSnackBar('Retrying failed pages with cached capture…');
+    final stillFailed = <_ChapterPageTask>[];
+
+    for (final task in failedPages) {
+      try {
+        final bustedUrl = _appendCacheBuster(task.page.url);
+        final file = await getNetworkImageFile(
+          bustedUrl,
+          headers: _buildFallbackHeaders(task.page.headers),
+        );
+        await file.copy(task.targetFile.path);
+      } catch (e, stackTrace) {
+        Logger.i('Cache fallback failed for page ${task.index + 1}: $e');
+        Logger.i(stackTrace.toString());
+        stillFailed.add(task);
+      } finally {
+        _updateProgress(trackingKey, (task.index + 1) / task.totalPages);
+      }
+    }
+
+    return stillFailed;
+  }
+
+  Future<bool> _performFullChapterCapture({
+    required List<_ChapterPageTask> tasks,
+    required String trackingKey,
+  }) async {
+    if (tasks.isEmpty) {
+      return true;
+    }
+
+    infoSnackBar('Falling back to full chapter capture…');
+    for (final task in tasks) {
+      try {
+        final bustedUrl = _appendCacheBuster(task.page.url);
+        final file = await getNetworkImageFile(
+          bustedUrl,
+          headers: _buildFallbackHeaders(task.page.headers),
+        );
+        await file.copy(task.targetFile.path);
+      } catch (e, stackTrace) {
+        Logger.i('Full chapter capture failed at page ${task.index + 1}: $e');
+        Logger.i(stackTrace.toString());
+        return false;
+      } finally {
+        _updateProgress(trackingKey, (task.index + 1) / task.totalPages);
+      }
+    }
+
+    return true;
+  }
+
+  Map<String, String> _buildFallbackHeaders(Map<String, String>? base) {
+    final headers = Map<String, String>.from(base ?? {});
+    headers['User-Agent'] ??= _fallbackUserAgent;
+    headers['Cache-Control'] = 'no-cache';
+    headers['Pragma'] = 'no-cache';
+    return headers;
+  }
+
+  String _appendCacheBuster(String url) {
+    final separator = url.contains('?') ? '&' : '?';
+    return '$url${separator}cb=${DateTime.now().millisecondsSinceEpoch}';
+  }
+
   Future<void> _downloadBinary(String url, File file,
-      {Map<String, String>? headers}) async {
+      {Map<String, String>? headers,
+      void Function(int received, int total)? onProgress}) async {
     final response = await _dio.get<List<int>>(
       url,
       options: Options(
@@ -474,39 +761,172 @@ class DownloadController extends GetxController {
         headers: headers,
       ),
       onReceiveProgress: (received, total) {
-        if (total != -1) {
-          _progress[file.path] = received / total;
-        }
+        onProgress?.call(received, total);
       },
     );
     await file.writeAsBytes(response.data!);
-    _progress.remove(file.path);
+  }
+
+  Future<DownloadedSubtitle?> _downloadPreferredSubtitle({
+    required Video video,
+    required Directory targetDir,
+    required String? preferredLanguage,
+  }) async {
+    final subtitles = video.subtitles;
+    if (subtitles == null || subtitles.isEmpty) return null;
+
+    final choice = _selectSubtitleTrack(
+      subtitles,
+      preferredLanguage: preferredLanguage,
+    );
+    if (choice == null) return null;
+
+    final url = choice.subtitle.file;
+    if (url == null || url.isEmpty) return null;
+
+    final extension = _inferExtension(url, fallback: '.vtt');
+    final baseName = _slugify(
+        choice.subtitle.label ?? _languageDisplayName(choice.languageCode));
+    final file = File(p.join(targetDir.path, '$baseName$extension'));
+    await _downloadBinary(url, file);
+    return DownloadedSubtitle(
+      path: file.path,
+      label: choice.subtitle.label ?? _languageDisplayName(choice.languageCode),
+      languageCode: _canonicalLanguageCode(choice.languageCode),
+    );
+  }
+
+  _SubtitleChoice? _selectSubtitleTrack(
+    List<Subtitle> subtitles, {
+    String? preferredLanguage,
+  }) {
+    final normalizedPreferred = _normalizeLanguageCode(preferredLanguage);
+    if (normalizedPreferred != null) {
+      final preferredMatch = subtitles.firstWhereOrNull(
+        (subtitle) => _subtitleMatchesLanguage(subtitle, normalizedPreferred),
+      );
+      if (preferredMatch != null) {
+        return _SubtitleChoice(
+          subtitle: preferredMatch,
+          languageCode: normalizedPreferred,
+        );
+      }
+    }
+
+    final englishMatch = subtitles.firstWhereOrNull(
+      (subtitle) => _subtitleMatchesLanguage(subtitle, 'en'),
+    );
+    if (englishMatch != null) {
+      return _SubtitleChoice(subtitle: englishMatch, languageCode: 'en');
+    }
+
+    if (subtitles.isEmpty) return null;
+    return _SubtitleChoice(subtitle: subtitles.first, languageCode: null);
+  }
+
+  bool _subtitleMatchesLanguage(Subtitle subtitle, String languageCode) {
+    return _labelMatchesLanguage(subtitle.label, languageCode);
+  }
+
+  bool _labelMatchesLanguage(String? label, String languageCode) {
+    if (label == null || label.isEmpty) return false;
+    final normalizedLabel = label.toLowerCase();
+    for (final token in _languageTokens(languageCode)) {
+      if (token.isEmpty) continue;
+      if (normalizedLabel.contains(token)) return true;
+    }
+    final aliases = _languageAliases[_languageBaseCode(languageCode)] ?? const [];
+    for (final alias in aliases) {
+      if (normalizedLabel.contains(alias)) return true;
+    }
+    return false;
+  }
+
+  Set<String> _languageTokens(String code) {
+    final normalized = code.toLowerCase();
+    final tokens = <String>{
+      normalized,
+      normalized.replaceAll(RegExp(r'[^a-z]'), ''),
+    };
+    tokens.addAll(normalized.split(RegExp(r'[-_]')));
+    tokens.removeWhere((element) => element.isEmpty);
+    return tokens;
+  }
+
+  String? _normalizeLanguageCode(String? code) {
+    if (code == null) return null;
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) return null;
+    return trimmed.toLowerCase();
+  }
+
+  String _languageBaseCode(String code) {
+    final normalized = code.toLowerCase();
+    final separatorIndex = normalized.indexOf(RegExp(r'[-_]'));
+    if (separatorIndex == -1) return normalized;
+    return normalized.substring(0, separatorIndex);
+  }
+
+  String _languageDisplayName(String? code) {
+    if (code == null || code.isEmpty) return 'Subtitle';
+    final base = _languageBaseCode(code);
+    return _languageDisplayNames[base] ?? code.toUpperCase();
+  }
+
+  String? _canonicalLanguageCode(String? code) {
+    final normalized = _normalizeLanguageCode(code);
+    return normalized?.isEmpty ?? true ? null : normalized;
   }
 
   Future<void> _downloadHlsPlaylist(String playlistUrl, Directory targetDir,
-      {Map<String, String>? headers}) async {
+      {Map<String, String>? headers, String? progressKey}) async {
     final playlistContent = await _fetchPlaylist(playlistUrl, headers: headers);
-    final segments = <String>[];
+    final lines = LineSplitter.split(playlistContent).toList();
+    final totalSegments =
+        lines.where((line) => !_isCommentOrEmpty(line)).length;
     final buffer = StringBuffer();
+    var completedSegments = 0;
 
-    for (final line in LineSplitter.split(playlistContent)) {
+    for (final line in lines) {
       final trimmed = line.trim();
-      if (trimmed.startsWith('#') || trimmed.isEmpty) {
+      if (_isCommentOrEmpty(trimmed)) {
         buffer.writeln(trimmed);
         continue;
       }
 
       final absolute = _resolveUrl(playlistUrl, trimmed);
       final ext = _inferExtension(absolute, fallback: '.ts');
-      final segmentName = 'segment_${segments.length.toString().padLeft(4, '0')}$ext';
+      final segmentName =
+          'segment_${completedSegments.toString().padLeft(4, '0')}$ext';
       final file = File(p.join(targetDir.path, segmentName));
-      await _downloadBinary(absolute, file, headers: headers);
+      await _downloadBinary(
+        absolute,
+        file,
+        headers: headers,
+        onProgress: (received, total) {
+          if (progressKey == null || total == -1 || totalSegments == 0) return;
+          final segmentFraction = (received / total).clamp(0, 1);
+          _updateProgress(
+              progressKey, (completedSegments + segmentFraction) / totalSegments);
+        },
+      );
+      completedSegments++;
+      if (progressKey != null && totalSegments > 0) {
+        _updateProgress(progressKey, completedSegments / totalSegments);
+      }
       buffer.writeln(segmentName);
-      segments.add(segmentName);
+    }
+
+    if (progressKey != null) {
+      _updateProgress(progressKey, 1.0);
     }
 
     final playlistFile = File(p.join(targetDir.path, 'playlist.m3u8'));
     await playlistFile.writeAsString(buffer.toString());
+  }
+
+  bool _isCommentOrEmpty(String line) {
+    return line.isEmpty || line.startsWith('#');
   }
 
   Future<String> _fetchPlaylist(String url, {Map<String, String>? headers}) async {
@@ -582,6 +1002,49 @@ class DownloadController extends GetxController {
   }
 }
 
+const Map<String, List<String>> _languageAliases = {
+  'en': ['english', 'eng'],
+  'es': ['spanish', 'español', 'esp', 'latam', 'latino'],
+  'pt': ['portuguese', 'portugues', 'português', 'brazilian', 'br'],
+  'fr': ['french', 'français', 'francais'],
+  'de': ['german', 'deutsch'],
+  'it': ['italian', 'italiano'],
+  'ar': ['arabic', 'عربي'],
+  'hi': ['hindi'],
+  'ja': ['japanese', 'nihongo', '日本語'],
+  'ko': ['korean', '한글', '한국어'],
+  'zh': ['chinese', 'mandarin', 'cantonese', '中文'],
+  'ru': ['russian', 'русский'],
+  'tr': ['turkish', 'türkçe'],
+  'vi': ['vietnamese', 'tiếng việt'],
+  'id': ['indonesian', 'bahasa'],
+};
+
+const Map<String, String> _languageDisplayNames = {
+  'en': 'English',
+  'es': 'Spanish',
+  'pt': 'Portuguese',
+  'fr': 'French',
+  'de': 'German',
+  'it': 'Italian',
+  'ar': 'Arabic',
+  'hi': 'Hindi',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'zh': 'Chinese',
+  'ru': 'Russian',
+  'tr': 'Turkish',
+  'vi': 'Vietnamese',
+  'id': 'Indonesian',
+};
+
+class _SubtitleChoice {
+  final Subtitle subtitle;
+  final String? languageCode;
+
+  _SubtitleChoice({required this.subtitle, required this.languageCode});
+}
+
 class DownloadedChapter {
   final Directory directory;
   final String mediaId;
@@ -609,6 +1072,7 @@ class DownloadedEpisode {
   final String? filePath;
   final String episodeNumber;
   final String? title;
+  final List<DownloadedSubtitle> subtitles;
   final int sizeBytes;
 
   DownloadedEpisode({
@@ -618,8 +1082,75 @@ class DownloadedEpisode {
     required this.filePath,
     required this.episodeNumber,
     required this.title,
+    this.subtitles = const [],
     required this.sizeBytes,
   });
+}
+
+class DownloadedSubtitle {
+  final String path;
+  final String label;
+  final String? languageCode;
+
+  const DownloadedSubtitle({
+    required this.path,
+    required this.label,
+    this.languageCode,
+  });
+
+  factory DownloadedSubtitle.fromJson(Map<String, dynamic> json) {
+    return DownloadedSubtitle(
+      path: json['path']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      languageCode: json['languageCode']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'path': path,
+        'label': label,
+        if (languageCode != null && languageCode!.isNotEmpty)
+          'languageCode': languageCode,
+      };
+
+  String get displayLabel =>
+      label.isNotEmpty ? label : _languageDisplayName(languageCode);
+}
+
+class _ChapterPageTask {
+  _ChapterPageTask({
+    required this.page,
+    required this.targetFile,
+    required this.index,
+    required this.totalPages,
+    required this.fileName,
+  });
+
+  final PageUrl page;
+  final File targetFile;
+  final int index;
+  final int totalPages;
+  final String fileName;
+}
+
+class DownloadProgressContext {
+  const DownloadProgressContext({
+    required this.type,
+    required this.mediaId,
+    required this.mediaTitle,
+    this.episodeNumber,
+    this.episodeTitle,
+    this.chapterNumber,
+    this.chapterTitle,
+  });
+
+  final ItemType type;
+  final String mediaId;
+  final String? mediaTitle;
+  final String? episodeNumber;
+  final String? episodeTitle;
+  final double? chapterNumber;
+  final String? chapterTitle;
 }
 
 class _VariantPlaylist {

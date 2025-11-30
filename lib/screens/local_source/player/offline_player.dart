@@ -1,6 +1,7 @@
 import 'package:anymex/controllers/service_handler/service_handler.dart';
 import 'package:anymex/models/Media/media.dart';
 import 'package:anymex/models/Offline/Hive/episode.dart';
+import 'package:anymex/models/Offline/Hive/video.dart' as model;
 import 'package:anymex/screens/anime/watch/controller/player_controller.dart';
 import 'package:anymex/screens/anime/watch/controls/bottom_controls.dart';
 import 'package:anymex/screens/anime/watch/controls/center_controls.dart';
@@ -30,10 +31,18 @@ class LocalEpisode {
 class OfflineWatchPage extends StatefulWidget {
   final LocalEpisode episode;
   final List<LocalEpisode> episodeList;
+  final Episode? currentEpisodeData;
+  final List<Episode>? episodeCatalog;
+  final Media? anilistData;
+  final List<model.Track>? subtitleTracks;
   const OfflineWatchPage({
     super.key,
     required this.episode,
     required this.episodeList,
+    this.currentEpisodeData,
+    this.episodeCatalog,
+    this.anilistData,
+    this.subtitleTracks,
   });
 
   @override
@@ -46,13 +55,15 @@ class _OfflineWatchPageState extends State<OfflineWatchPage> {
   @override
   initState() {
     super.initState();
-    controller = Get.put(PlayerController.offline(
-        folderName: widget.episode.folderName,
-        itemName: widget.episode.name,
-        videoPath: widget.episode.path,
-        episode: Episode(number: 'Offline'),
-        episodeList: [],
-        anilistData: Media(serviceType: ServicesType.simkl)));
+  controller = Get.put(PlayerController.offline(
+    folderName: widget.episode.folderName,
+    itemName: widget.episode.name,
+    videoPath: widget.episode.path,
+    episode: widget.currentEpisodeData ?? Episode(number: 'Offline'),
+    episodeList: widget.episodeCatalog ?? const [],
+    anilistData:
+      widget.anilistData ?? Media(serviceType: ServicesType.simkl),
+    subtitleTracks: widget.subtitleTracks));
   }
 
   @override

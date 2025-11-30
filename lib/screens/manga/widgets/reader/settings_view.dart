@@ -40,49 +40,101 @@ class ReaderSettings {
                   ),
                   Obx(() {
                     final currentLayout = controller.readingLayout.value;
+                    final currentDoubleMode = controller.doublePageMode.value;
+
+                    String description;
+                    switch (currentDoubleMode) {
+                      case DoublePageMode.doubleFirst:
+                        description = 'Double First (2|1)';
+                      case DoublePageMode.coverFirst:
+                        description = 'Cover First (1|2)';
+                      case DoublePageMode.off:
+                        description = switch (currentLayout) {
+                          MangaPageViewMode.continuous => 'Continuous',
+                          MangaPageViewMode.paged => 'Paged',
+                        };
+                    }
+
+                    if (currentDoubleMode != DoublePageMode.off) {
+                      description += switch (currentLayout) {
+                        MangaPageViewMode.continuous => ' · Continuous',
+                        MangaPageViewMode.paged => ' · Paged',
+                      };
+                    }
+
                     return CustomTile(
                       title: 'Layout',
-                      description: switch (currentLayout) {
-                        MangaPageViewMode.continuous => 'Continuous',
-                        MangaPageViewMode.paged => 'Paged',
-                      },
+                      description: description,
                       icon: Iconsax.card,
-                      postFix: Row(
-                        spacing: 4,
+                      postFix: Wrap(
+                        spacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          for (final layout in [
-                            MangaPageViewMode.continuous,
-                            MangaPageViewMode.paged
-                          ])
-                            IconButton.filled(
-                              isSelected: layout == currentLayout,
-                              style: IconButton.styleFrom(
-                                backgroundColor: layout == currentLayout
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .primary
-                                        .withOpacity(0.2)
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .surfaceContainer,
-                                foregroundColor: layout == currentLayout
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Theme.of(context).iconTheme.color,
-                              ),
-                              tooltip: switch (layout) {
-                                MangaPageViewMode.continuous => 'Continuous',
-                                MangaPageViewMode.paged => 'Paged',
-                              },
-                              icon: switch (layout) {
-                                MangaPageViewMode.continuous =>
-                                  const Icon(Iconsax.slider_vertical),
-                                MangaPageViewMode.paged =>
-                                  const Icon(Iconsax.grid_9),
-                              },
-                              onPressed: () {
-                                controller.changeReadingLayout(layout);
-                              },
-                            )
+                          _buildLayoutToggleButton(
+                            context: context,
+                            isSelected: currentDoubleMode ==
+                                DoublePageMode.doubleFirst,
+                            tooltip: 'Double First (2|1)',
+                            icon: const Icon(Icons.looks_two),
+                            onPressed: () {
+                              if (controller.readingLayout.value !=
+                                  MangaPageViewMode.paged) {
+                                controller
+                                    .changeReadingLayout(MangaPageViewMode.paged);
+                              }
+                              controller.changeDoublePageMode(
+                                  DoublePageMode.doubleFirst);
+                            },
+                          ),
+                          _buildLayoutToggleButton(
+                            context: context,
+                            isSelected: currentDoubleMode ==
+                                DoublePageMode.coverFirst,
+                            tooltip: 'Cover First (1|2)',
+                            icon: const Icon(Icons.looks_one),
+                            onPressed: () {
+                              if (controller.readingLayout.value !=
+                                  MangaPageViewMode.paged) {
+                                controller
+                                    .changeReadingLayout(MangaPageViewMode.paged);
+                              }
+                              controller.changeDoublePageMode(
+                                  DoublePageMode.coverFirst);
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          _buildLayoutToggleButton(
+                            context: context,
+                            isSelected: currentLayout ==
+                                    MangaPageViewMode.continuous &&
+                                currentDoubleMode == DoublePageMode.off,
+                            tooltip: 'Continuous',
+                            icon: const Icon(Iconsax.slider_vertical),
+                            onPressed: () {
+                              if (currentDoubleMode != DoublePageMode.off) {
+                                controller
+                                    .changeDoublePageMode(DoublePageMode.off);
+                              }
+                              controller
+                                  .changeReadingLayout(MangaPageViewMode.continuous);
+                            },
+                          ),
+                          _buildLayoutToggleButton(
+                            context: context,
+                            isSelected:
+                                currentLayout == MangaPageViewMode.paged &&
+                                    currentDoubleMode == DoublePageMode.off,
+                            tooltip: 'Paged',
+                            icon: const Icon(Iconsax.grid_9),
+                            onPressed: () {
+                              if (currentDoubleMode != DoublePageMode.off) {
+                                controller
+                                    .changeDoublePageMode(DoublePageMode.off);
+                              }
+                              controller
+                                  .changeReadingLayout(MangaPageViewMode.paged);
+                            },
+                          ),
                         ],
                       ),
                     );
@@ -151,7 +203,7 @@ class ReaderSettings {
                     return CustomSwitchTile(
                       icon: Iconsax.pharagraphspacing,
                       title: "Spaced Pages",
-                      description: "Continuous Mode only",
+                      description: "Adds gaps in both double paged and continuous layouts",
                       switchValue: controller.spacedPages.value,
                       onChanged: (val) => controller.toggleSpacedPages(),
                     );
@@ -241,6 +293,29 @@ class ReaderSettings {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildLayoutToggleButton({
+    required BuildContext context,
+    required bool isSelected,
+    required String tooltip,
+    required Icon icon,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton.filled(
+      isSelected: isSelected,
+      style: IconButton.styleFrom(
+        backgroundColor: isSelected
+            ? Theme.of(context).colorScheme.primary.withOpacity(0.2)
+            : Theme.of(context).colorScheme.surfaceContainer,
+        foregroundColor: isSelected
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).iconTheme.color,
+      ),
+      tooltip: tooltip,
+      icon: icon,
+      onPressed: onPressed,
     );
   }
 }

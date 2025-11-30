@@ -6,14 +6,17 @@ import 'package:get/get.dart';
 class Extensions {
   final settings = Get.put(SourceController());
 
-  Future<void> addRepo(ItemType type, String repo, ExtensionType ext) async {
-    if (type == ItemType.manga) {
-      settings.setMangaRepo(repo, ext);
-    } else if (type == ItemType.anime) {
-      settings.setAnimeRepo(repo, ext);
-    } else {
-      settings.activeNovelRepo = repo;
+  Future<bool> addRepo(ItemType type, String repo, ExtensionType ext) async {
+    final didAppend = settings.appendRepoUrl(
+      type: type,
+      extensionType: ext,
+      repo: repo,
+    );
+
+    if (didAppend) {
+      await settings.fetchRepos();
     }
-    await settings.fetchRepos();
+
+    return didAppend;
   }
 }
