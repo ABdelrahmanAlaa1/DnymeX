@@ -26,7 +26,7 @@ jobs:
       - name: Install Java 17
         uses: actions/setup-java@v3
         with:
-          distribution: "temurin"
+          distribution: "adopt"
           java-version: "17"
 
       - name: Install Flutter
@@ -52,6 +52,10 @@ jobs:
           key: cmake-3.18.1-linux-x64
 
       - name: Setup Android toolchain
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           if [ ! -d "$HOME/cmake/cmake-3.18.1-Linux-x86_64" ]; then
             mkdir -p $HOME/cmake && cd $HOME/cmake
@@ -62,6 +66,18 @@ jobs:
           CMAKE_DIR="$HOME/cmake/cmake-3.18.1-Linux-x86_64"
           echo "cmake.dir=$CMAKE_DIR" >> android/local.properties
           mkdir -p android/app
+
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/anymex.jks
+            cat > android/key.properties << EOF
+            storePassword=$KEYSTORE_PASSWORD
+            keyPassword=$KEYSTORE_PASSWORD
+            keyAlias=$KEY_ALIAS
+            storeFile=anymex.jks
+            EOF
+          else
+            echo "⚠️ No signing secrets provided — building unsigned APKs"
+          fi
 
       - name: Generate .env
         shell: bash
