@@ -15,7 +15,6 @@ import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:extended_image/extended_image.dart';
 
 class DownloadController extends GetxController {
   static const String downloadedSourceValue = '__anymex_downloaded__';
@@ -344,12 +343,12 @@ class DownloadController extends GetxController {
       }
 
       try {
-        // Strategy 3: ExtendedNetworkImageProvider (Preload)
+        // Strategy 3: temp cached capture
         final file = await getNetworkImageFile(url, headers: headers);
         await file.copy(targetFile.path);
         return;
       } catch (e) {
-        Logger.i('Strategy 3 (ExtendedImage) failed for $url: $e');
+        Logger.i('Strategy 3 (cache capture) failed for $url: $e');
       }
 
       retries++;
@@ -442,19 +441,6 @@ class DownloadController extends GetxController {
       }
 
       final subtitleEntries = <DownloadedSubtitle>[];
-      try {
-        final subtitle = await _downloadPreferredSubtitle(
-          video: selected,
-          targetDir: dir,
-          preferredLanguage: activeSource.lang,
-        );
-        if (subtitle != null) {
-          subtitleEntries.add(subtitle);
-        }
-      } catch (e, stackTrace) {
-        Logger.i('Failed to download subtitle: $e');
-        Logger.i(stackTrace.toString());
-      }
 
       final metadata = {
         'type': 'anime',
@@ -770,129 +756,41 @@ class DownloadController extends GetxController {
     String url, {
     Map<String, String>? headers,
   }) async {
-    final provider = ExtendedNetworkImageProvider(
-      url,
-      headers: headers,
-      cache: true,
-      cacheMaxAge: const Duration(days: 7),
-    );
-    final cachedFile = await provider.getNetworkImageFile();
-    if (cachedFile == null) {
-      throw Exception('Unable to retrieve network image for $url');
+    final tempDir = await getTemporaryDirectory();
+    final cacheDir = Directory(p.join(tempDir.path, 'anymex_image_cache'));
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
     }
-    return File(cachedFile.path);
-  }
 
-  Future<DownloadedSubtitle?> _downloadPreferredSubtitle({
-    required Video video,
-    required Directory targetDir,
-    required String? preferredLanguage,
-  }) async {
-    final subtitles = video.subtitles;
-    if (subtitles == null || subtitles.isEmpty) return null;
+    final safeHash = (url.hashCode & 0x7fffffff).toString();
+    final extension = _inferExtension(url, fallback: '.img');
+    final file = File(p.join(cacheDir.path, 'img_$safeHash$extension'));
 
-    final choice = _selectSubtitleTrack(
-      subtitles,
-      preferredLanguage: preferredLanguage,
-    );
-    if (choice == null) return null;
-
-    final url = choice.subtitle.file;
-    if (url == null || url.isEmpty) return null;
-
-    final extension = _inferExtension(url, fallback: '.vtt');
-    final baseName = _slugify(
-        choice.subtitle.label ?? _languageDisplayName(choice.languageCode));
-    final file = File(p.join(targetDir.path, '$baseName$extension'));
-    await _downloadBinary(url, file);
-    return DownloadedSubtitle(
-      path: file.path,
-      label: choice.subtitle.label ?? _languageDisplayName(choice.languageCode),
-      languageCode: _canonicalLanguageCode(choice.languageCode),
-    );
-  }
-
-  _SubtitleChoice? _selectSubtitleTrack(
-    List<dynamic> subtitles, {
-    String? preferredLanguage,
-  }) {
-    final normalizedPreferred = _normalizeLanguageCode(preferredLanguage);
-    if (normalizedPreferred != null) {
-      final preferredMatch = subtitles.firstWhereOrNull(
-        (subtitle) => _subtitleMatchesLanguage(subtitle, normalizedPreferred),
-      );
-      if (preferredMatch != null) {
-        return _SubtitleChoice(
-          subtitle: preferredMatch,
-          languageCode: normalizedPreferred,
-        );
+    if (await file.exists()) {
+      final length = await file.length();
+      if (length > 0) {
+        return file;
       }
+      await file.delete();
     }
 
-    final englishMatch = subtitles.firstWhereOrNull(
-      (subtitle) => _subtitleMatchesLanguage(subtitle, 'en'),
-    );
-    if (englishMatch != null) {
-      return _SubtitleChoice(subtitle: englishMatch, languageCode: 'en');
+    final tempFile = File('${file.path}.tmp');
+    if (await tempFile.exists()) {
+      await tempFile.delete();
     }
 
-    if (subtitles.isEmpty) return null;
-    return _SubtitleChoice(subtitle: subtitles.first, languageCode: null);
-  }
-
-  bool _subtitleMatchesLanguage(dynamic subtitle, String languageCode) {
-    return _labelMatchesLanguage(subtitle.label, languageCode);
-  }
-
-  bool _labelMatchesLanguage(String? label, String languageCode) {
-    if (label == null || label.isEmpty) return false;
-    final normalizedLabel = label.toLowerCase();
-    for (final token in _languageTokens(languageCode)) {
-      if (token.isEmpty) continue;
-      if (normalizedLabel.contains(token)) return true;
+    try {
+      await _downloadBinary(url, tempFile, headers: headers);
+      await tempFile.rename(file.path);
+      return file;
+    } catch (e) {
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+      rethrow;
     }
-    final aliases = _languageAliases[_languageBaseCode(languageCode)] ?? const [];
-    for (final alias in aliases) {
-      if (normalizedLabel.contains(alias)) return true;
-    }
-    return false;
   }
 
-  Set<String> _languageTokens(String code) {
-    final normalized = code.toLowerCase();
-    final tokens = <String>{
-      normalized,
-      normalized.replaceAll(RegExp(r'[^a-z]'), ''),
-    };
-    tokens.addAll(normalized.split(RegExp(r'[-_]')));
-    tokens.removeWhere((element) => element.isEmpty);
-    return tokens;
-  }
-
-  String? _normalizeLanguageCode(String? code) {
-    if (code == null) return null;
-    final trimmed = code.trim();
-    if (trimmed.isEmpty) return null;
-    return trimmed.toLowerCase();
-  }
-
-  String _languageBaseCode(String code) {
-    final normalized = code.toLowerCase();
-    final separatorIndex = normalized.indexOf(RegExp(r'[-_]'));
-    if (separatorIndex == -1) return normalized;
-    return normalized.substring(0, separatorIndex);
-  }
-
-  String _languageDisplayName(String? code) {
-    if (code == null || code.isEmpty) return 'Subtitle';
-    final base = _languageBaseCode(code);
-    return _languageDisplayNames[base] ?? code.toUpperCase();
-  }
-
-  String? _canonicalLanguageCode(String? code) {
-    final normalized = _normalizeLanguageCode(code);
-    return normalized?.isEmpty ?? true ? null : normalized;
-  }
 
   Future<void> _downloadHlsPlaylist(String playlistUrl, Directory targetDir,
       {Map<String, String>? headers, String? progressKey}) async {
@@ -1018,49 +916,6 @@ class DownloadController extends GetxController {
   }
 }
 
-const Map<String, List<String>> _languageAliases = {
-  'en': ['english', 'eng'],
-  'es': ['spanish', 'español', 'esp', 'latam', 'latino'],
-  'pt': ['portuguese', 'portugues', 'português', 'brazilian', 'br'],
-  'fr': ['french', 'français', 'francais'],
-  'de': ['german', 'deutsch'],
-  'it': ['italian', 'italiano'],
-  'ar': ['arabic', 'عربي'],
-  'hi': ['hindi'],
-  'ja': ['japanese', 'nihongo', '日本語'],
-  'ko': ['korean', '한글', '한국어'],
-  'zh': ['chinese', 'mandarin', 'cantonese', '中文'],
-  'ru': ['russian', 'русский'],
-  'tr': ['turkish', 'türkçe'],
-  'vi': ['vietnamese', 'tiếng việt'],
-  'id': ['indonesian', 'bahasa'],
-};
-
-const Map<String, String> _languageDisplayNames = {
-  'en': 'English',
-  'es': 'Spanish',
-  'pt': 'Portuguese',
-  'fr': 'French',
-  'de': 'German',
-  'it': 'Italian',
-  'ar': 'Arabic',
-  'hi': 'Hindi',
-  'ja': 'Japanese',
-  'ko': 'Korean',
-  'zh': 'Chinese',
-  'ru': 'Russian',
-  'tr': 'Turkish',
-  'vi': 'Vietnamese',
-  'id': 'Indonesian',
-};
-
-class _SubtitleChoice {
-  final dynamic subtitle;
-  final String? languageCode;
-
-  _SubtitleChoice({required this.subtitle, required this.languageCode});
-}
-
 class DownloadedChapter {
   final Directory directory;
   final String mediaId;
@@ -1130,7 +985,7 @@ class DownloadedSubtitle {
       };
 
   String get displayLabel =>
-      label.isNotEmpty ? label : _languageDisplayName(languageCode);
+    label.isNotEmpty ? label : (languageCode?.toUpperCase() ?? 'SUBTITLE');
 }
 
 class _ChapterPageTask {
