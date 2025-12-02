@@ -32,6 +32,10 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
     def keystoreProperties = new Properties()
     def keystorePropertiesFile = rootProject.file('key.properties')
     def hasReleaseKeystore = keystorePropertiesFile.exists()
