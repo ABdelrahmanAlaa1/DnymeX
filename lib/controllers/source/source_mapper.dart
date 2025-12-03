@@ -183,11 +183,9 @@ Future<Media?> mapMedia(
   }
 
   print("No good match. Best: ${bestScore.toStringAsFixed(3)}");
-  searchedTitle.value = fallbackResults.isNotEmpty
-      ? fallbackResults.first.title ?? 'Unknown Title'
-      : "No match found";
+    searchedTitle.value = fallbackResults.isNotEmpty
+      ? 'No Match Found (${activeSource.name ?? 'Source'})'
+      : 'No Match Found';
 
-  return fallbackResults.isNotEmpty
-      ? Media.froDMedia(fallbackResults.first, type)
-      : Media(serviceType: ServicesType.anilist);
+    return null;
 }
