@@ -205,7 +205,15 @@ class MainApp extends StatelessWidget {
       onKeyEvent: (KeyEvent event) async {
         if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.escape) {
-            Navigator.pop(Get.context!);
+            if (Get.isDialogOpen == true || Get.isBottomSheetOpen == true) {
+              Get.back();
+              return;
+            }
+
+            final navigatorState = Get.key.currentState;
+            if (navigatorState != null && navigatorState.canPop()) {
+              navigatorState.maybePop();
+            }
           } else if (event.logicalKey == LogicalKeyboardKey.f11) {
             bool isFullScreen = await windowManager.isFullScreen();
             AnymexTitleBar.setFullScreen(!isFullScreen);
