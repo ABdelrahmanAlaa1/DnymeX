@@ -896,6 +896,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   void setExternalSub(model.Track? track) {
     if (track == null) {
       selectedExternalSub.value = model.Track();
+      selectedSubsTrack.value = null;
       setSubtitleTrack(SubtitleTrack.no());
       return;
     }
@@ -904,7 +905,14 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       return;
     }
     selectedExternalSub.value = track;
+    selectedSubsTrack.value = null;
     setSubtitleTrack(SubtitleTrack.uri(track.file!, title: track.label));
+  }
+
+  void setEmbeddedSubtitle(SubtitleTrack track) {
+    selectedExternalSub.value = model.Track();
+    selectedSubsTrack.value = track;
+    setSubtitleTrack(track);
   }
 
   void setServerTrack(model.Video track) async {

@@ -1,8 +1,10 @@
 import 'package:anymex/models/Offline/Hive/video.dart';
 import 'package:anymex/screens/anime/watch/controller/player_controller.dart';
 import 'package:anymex/screens/anime/widgets/episode/normal_episode.dart';
+import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:dartotsu_extension_bridge/Mangayomi/string_extensions.dart';
 import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
@@ -446,6 +448,14 @@ class BottomSheetItem {
 }
 
 class PlayerBottomSheets {
+  static const List<String> _subtitleFileExtensions = [
+    'srt',
+    'ass',
+    'ssa',
+    'vtt',
+    'sub',
+    'sbv',
+  ];
   static Future<T?> show<T>(
       {required BuildContext context,
       required String title,
@@ -503,50 +513,39 @@ class PlayerBottomSheets {
     );
   }
 
-  static Future<int?> showOfflineSubs(
-      BuildContext context, PlayerController controller) {
-    final tracks = controller.embeddedSubs.value;
-    final currentIndex =
-        tracks.indexOf(controller.selectedSubsTrack.value ?? tracks.first);
-    return show<int>(
-      context: context,
-      title: 'Subtitle Tracks',
-      showSearch: tracks.length > 5,
-      searchHint: 'Search subtitle tracks...',
-      items: [
-        const BottomSheetItem(
-            title: 'None', subtitle: 'Subtitle Track', icon: Icons.audiotrack),
-        ...tracks
-            .where((e) => e.title != null && e.language != null)
-            .map((entry) {
-          return BottomSheetItem(
-            title: (entry.language ?? entry.title ?? entry.uri.toString())
-                .toUpperCase(),
-            subtitle: 'Subtitle Track',
-            icon: Icons.closed_caption_rounded,
-          );
-        })
-      ],
-      selectedIndex: currentIndex < 0 ? 0 : currentIndex,
-      onItemSelected: (index) {
-        if (index == 0) {
-          controller.setSubtitleTrack(SubtitleTrack.no());
-        } else {
-          final selectedTrack = tracks[index];
-          controller.selectedSubsTrack.value = selectedTrack;
-          controller.setSubtitleTrack(selectedTrack);
-        }
-        Get.back(result: index);
-      },
-    );
-  }
-
   static Future<int?> showSubtitleTracks(
     BuildContext context,
     PlayerController controller,
   ) {
-    final tracks = controller.externalSubs.value;
-    final selectedTrack = tracks.indexOf(controller.selectedExternalSub.value);
+    final embeddedTracks = controller.embeddedSubs.value;
+    final externalTracks = controller.externalSubs.value;
+
+    final filteredEmbedded = List<SubtitleTrack>.from(embeddedTracks);
+
+    const searchIndex = 0;
+    const importIndex = 1;
+    const noneIndex = 2;
+    final embeddedStartIndex = 3;
+    final externalStartIndex = embeddedStartIndex + filteredEmbedded.length;
+
+    var selectedIndex = noneIndex;
+    final externalSelection = controller.selectedExternalSub.value;
+    final externalSelectedIndex = externalTracks.indexWhere((track) =>
+        (track.file?.isNotEmpty ?? false) &&
+        track.file == externalSelection.file &&
+        track.label == externalSelection.label);
+
+    if (externalSelectedIndex >= 0) {
+      selectedIndex = externalStartIndex + externalSelectedIndex;
+    } else {
+      final embeddedSelection = controller.selectedSubsTrack.value;
+      final embeddedSelectedIndex = embeddedSelection == null
+          ? -1
+          : filteredEmbedded.indexWhere((track) => track == embeddedSelection);
+      if (embeddedSelectedIndex >= 0) {
+        selectedIndex = embeddedStartIndex + embeddedSelectedIndex;
+      }
+    }
 
     return show<int>(
       context: context,
@@ -558,33 +557,67 @@ class PlayerBottomSheets {
           icon: Icons.cloud_download,
         ),
         const BottomSheetItem(
+          title: 'Import Subtitle',
+          subtitle: 'Load from your device',
+          icon: Icons.upload_file,
+        ),
+        const BottomSheetItem(
           title: 'None',
           subtitle: 'No subtitles',
           icon: Icons.subtitles_off,
         ),
-        ...tracks.map((e) => BottomSheetItem(
-              title: e.label ?? 'No Title',
-              subtitle: 'Local Subtitle Track',
-              icon: Icons.subtitles,
-            )),
+        ...filteredEmbedded.map(
+          (track) => BottomSheetItem(
+            title: _formatEmbeddedSubtitleLabel(track),
+            subtitle: 'Embedded subtitle',
+            icon: Icons.closed_caption_rounded,
+          ),
+        ),
+        ...externalTracks.map(
+          (track) => BottomSheetItem(
+            title: track.label ?? 'Subtitle Track',
+            subtitle: _describeExternalSubtitle(track),
+            icon: Icons.subtitles,
+          ),
+        ),
       ],
-      selectedIndex: controller.selectedExternalSub.value == Track()
-          ? 1
-          : selectedTrack + 2,
-      onItemSelected: (index) {
-        if (index == 0) {
+      selectedIndex: selectedIndex,
+      onItemSelected: (index) async {
+        if (index == searchIndex) {
           Future.delayed(const Duration(milliseconds: 1000), () {
             controller.isSubtitlePaneOpened.value = true;
           });
           return;
-        } else if (index == 1) {
+        }
+
+        if (index == importIndex) {
+          await _importSubtitleFromDevice(controller);
+          return;
+        }
+
+        if (index == noneIndex) {
           controller.setExternalSub(null);
-        } else {
-          final selectedTrack = tracks[index - 2];
-          controller.setExternalSub(selectedTrack);
+          return;
+        }
+
+        if (index >= embeddedStartIndex &&
+            index < embeddedStartIndex + filteredEmbedded.length) {
+          final embeddedTrack = filteredEmbedded[index - embeddedStartIndex];
+          controller.setEmbeddedSubtitle(embeddedTrack);
+          return;
+        }
+
+        final externalIndex = index - externalStartIndex;
+        if (externalIndex >= 0 && externalIndex < externalTracks.length) {
+          controller.setExternalSub(externalTracks[externalIndex]);
         }
       },
     );
+  }
+
+  static Future<int?> showOfflineSubs(
+      BuildContext context, PlayerController controller) {
+    return showSubtitleTracks(context, controller);
   }
 
   static Future<String?> showVideoServers(
@@ -668,6 +701,60 @@ class PlayerBottomSheets {
         controller.setRate(selectedSpeed);
       },
     );
+  }
+
+  static Future<void> _importSubtitleFromDevice(
+      PlayerController controller) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _subtitleFileExtensions,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        snackBar('No subtitle file selected.');
+        return;
+      }
+
+      final file = result.files.single;
+      if (file.path == null || file.path!.isEmpty) {
+        snackBar('Unable to access subtitle file.');
+        return;
+      }
+
+      final track = Track(
+        file: Uri.file(file.path!).toString(),
+        label: file.name,
+      );
+
+      controller.externalSubs.value.insert(0, track);
+      controller.setExternalSub(track);
+    } catch (error) {
+      snackBar('Failed to import subtitle.');
+    }
+  }
+
+  static String _formatEmbeddedSubtitleLabel(SubtitleTrack track) {
+    final language = track.language?.toUpperCase();
+    final title = track.title;
+    if ((language?.isNotEmpty ?? false) && (title?.isNotEmpty ?? false)) {
+      return '$language · $title';
+    }
+    if (language?.isNotEmpty ?? false) {
+      return language!;
+    }
+    if (title?.isNotEmpty ?? false) {
+      return title!;
+    }
+    return track.uri?.toString() ?? 'Subtitle Track';
+  }
+
+  static String _describeExternalSubtitle(Track track) {
+    final location = track.file ?? '';
+    if (location.startsWith('http')) {
+      return 'Online subtitle';
+    }
+    return 'Downloaded / imported subtitle';
   }
 
   static Future<double?> showPlaylist(

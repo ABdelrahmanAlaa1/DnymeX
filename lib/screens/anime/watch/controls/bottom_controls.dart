@@ -163,17 +163,17 @@ class BottomControls extends StatelessWidget {
                           tooltip: 'Shaders & Color Profiles',
                           compact: true,
                         ),
-                        if (!controller.isOffline.value) ...[
-                          ControlButton(
-                            icon: Symbols.subtitles_rounded,
-                            onPressed: () =>
-                                PlayerBottomSheets.showSubtitleTracks(
-                              context,
-                              controller,
-                            ),
-                            tooltip: 'Subtitles',
-                            compact: true,
+                        ControlButton(
+                          icon: Symbols.subtitles_rounded,
+                          onPressed: () =>
+                              PlayerBottomSheets.showSubtitleTracks(
+                            context,
+                            controller,
                           ),
+                          tooltip: 'Subtitles',
+                          compact: true,
+                        ),
+                        if (!controller.isOffline.value) ...[
                           ControlButton(
                             icon: Symbols.cloud_rounded,
                             onPressed: () {
@@ -189,16 +189,6 @@ class BottomControls extends StatelessWidget {
                                 PlayerBottomSheets.showVideoQuality(
                                     context, controller),
                             tooltip: 'Quality',
-                            compact: true,
-                          ),
-                        ] else ...[
-                          ControlButton(
-                            icon: Symbols.subtitles_rounded,
-                            onPressed: () => PlayerBottomSheets.showOfflineSubs(
-                              context,
-                              controller,
-                            ),
-                            tooltip: 'Subtitles',
                             compact: true,
                           ),
                         ],
