@@ -378,6 +378,11 @@ class _RepoBottomSheetState extends State<RepoBottomSheet> {
         const SizedBox(height: 8),
         TextField(
           controller: controller,
+          minLines: 4,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          textAlignVertical: TextAlignVertical.top,
           decoration: InputDecoration(
             hintText: hint,
             prefixIcon: Icon(icon, size: 20),
