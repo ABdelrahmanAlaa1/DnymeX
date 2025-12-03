@@ -649,17 +649,19 @@ class ChapterListItem extends StatelessWidget {
       );
     }
 
-    final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+    final isPortrait =
+        MediaQuery.of(context).orientation == Orientation.portrait;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         _primaryButton(
           context,
-          label: isPortrait ? '' : 'Read',
+          label: 'Read',
           icon: Icons.menu_book_rounded,
           onPressed: onTap,
           isIconOnly: isPortrait,
+          showLabel: !isPortrait,
         ),
         const SizedBox(width: 8),
         _downloadButton(context),
@@ -671,24 +673,20 @@ class ChapterListItem extends StatelessWidget {
       {required String label,
       required IconData icon,
       required VoidCallback onPressed,
-      bool isIconOnly = false}) {
-    return Container(
-      decoration: BoxDecoration(boxShadow: [glowingShadow(context)]),
-      child: AnymexButton(
-        onTap: onPressed,
-        radius: 12,
-        width: isIconOnly ? 40 : 110,
-        height: 40,
-        color: Theme.of(context).colorScheme.primary,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: Theme.of(context).colorScheme.onPrimary,
-              size: 18,
-            ),
-            if (!isIconOnly) ...[
+      bool isIconOnly = false,
+      bool showLabel = true}) {
+    final iconWidget = Icon(
+      icon,
+      color: Theme.of(context).colorScheme.onPrimary,
+      size: 18,
+    );
+
+    final Widget visualChild = (isIconOnly || !showLabel)
+        ? Center(child: iconWidget)
+        : Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              iconWidget,
               const SizedBox(width: 6),
               AnymexText(
                 text: label,
@@ -696,7 +694,20 @@ class ChapterListItem extends StatelessWidget {
                 color: Theme.of(context).colorScheme.onPrimary,
               ),
             ],
-          ],
+          );
+
+    return Semantics(
+      button: true,
+      label: label,
+      child: Container(
+        decoration: BoxDecoration(boxShadow: [glowingShadow(context)]),
+        child: AnymexButton(
+          onTap: onPressed,
+          radius: 12,
+          width: isIconOnly ? 40 : 110,
+          height: 40,
+          color: Theme.of(context).colorScheme.primary,
+          child: visualChild,
         ),
       ),
     );
