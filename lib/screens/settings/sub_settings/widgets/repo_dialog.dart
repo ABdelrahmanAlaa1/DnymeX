@@ -220,6 +220,11 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
                       child: TextField(
                         controller: _controller,
                         focusNode: _focusNode,
+                        minLines: 4,
+                        maxLines: null,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        textAlignVertical: TextAlignVertical.top,
                         decoration: InputDecoration(
                             hintText: 'https://github.com/username/repo.json',
                             hintStyle: TextStyle(
