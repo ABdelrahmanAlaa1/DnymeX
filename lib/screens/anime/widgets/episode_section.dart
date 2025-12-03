@@ -145,6 +145,7 @@ class _EpisodeSectionState extends State<EpisodeSection> {
 
     if (value == DownloadController.downloadedSourceValue) {
       _setDownloadedMode(true);
+      if (mounted) setState(() {});
       return;
     }
 
@@ -166,12 +167,17 @@ class _EpisodeSectionState extends State<EpisodeSection> {
           media: media,
           source: selectedSource,
         );
+        sourceController.recordSourceUsage(
+          type: ItemType.anime,
+          source: selectedSource,
+        );
       }
 
       _requestCounter.value++;
       int currentRequestId = _requestCounter.value;
 
       _episodeFuture.value = _fetchEpisodes(currentRequestId);
+      if (mounted) setState(() {});
     } catch (e) {
       Logger.i(e.toString());
       widget.episodeError.value = true;
@@ -187,6 +193,30 @@ class _EpisodeSectionState extends State<EpisodeSection> {
   }
 
   Widget buildSourceDropdown() {
+    DropdownItem _buildSourceDropdownItem(Source source,
+        {bool highlighted = false}) {
+      final isMangayomi = source.extensionType == ExtensionType.mangayomi;
+      return DropdownItem(
+        value: source.id?.toString() ?? source.name ?? 'unknown',
+        text: source.name?.toUpperCase() ?? 'UNKNOWN SOURCE',
+        subtitle: source.lang?.toUpperCase() ?? 'UNKNOWN',
+        leadingIcon: NetworkSizedImage(
+          radius: 16,
+          imageUrl: isMangayomi
+              ? "https://raw.githubusercontent.com/kodjodevf/mangayomi/main/assets/app_icons/icon-red.png"
+              : 'https://aniyomi.org/img/logo-128px.png',
+          height: 24,
+          width: 24,
+        ),
+        backgroundColor: highlighted
+            ? Theme.of(context)
+                .colorScheme
+                .secondaryContainer
+                .withOpacity(0.35)
+            : null,
+      );
+    }
+
     final downloadedItem = DropdownItem(
       value: DownloadController.downloadedSourceValue,
       text: DownloadController.downloadedSourceLabel.toUpperCase(),
@@ -196,29 +226,37 @@ class _EpisodeSectionState extends State<EpisodeSection> {
         color: Theme.of(context).colorScheme.primary,
       ),
     );
+    final installedSources = sourceController.installedExtensions.toList();
+    final topSources =
+        sourceController.getTopSources(ItemType.anime, limit: 5);
+    final favoriteIds = topSources
+        .map((source) => source.id?.toString())
+        .whereType<String>()
+        .toSet();
 
-    List<DropdownItem> sourceItems =
-        sourceController.installedExtensions.isEmpty
-            ? []
-            : sourceController.installedExtensions.map<DropdownItem>((source) {
-            final isMangayomi = source.extensionType == ExtensionType.mangayomi;
+    final favoriteItems = topSources
+        .map((source) => _buildSourceDropdownItem(source, highlighted: true))
+        .toList();
 
-            return DropdownItem(
-              value: source.id?.toString() ?? source.name ?? 'unknown',
-              text: source.name?.toUpperCase() ?? 'Unknown Source',
-              subtitle: source.lang?.toUpperCase() ?? 'Unknown',
-              leadingIcon: NetworkSizedImage(
-                radius: 16,
-                imageUrl: isMangayomi
-                    ? "https://raw.githubusercontent.com/kodjodevf/mangayomi/main/assets/app_icons/icon-red.png"
-                    : 'https://aniyomi.org/img/logo-128px.png',
-                height: 24,
-                width: 24,
-              ),
-            );
-          }).toList();
+    final regularItems = installedSources
+        .where((source) =>
+            !favoriteIds.contains(source.id?.toString() ?? ''))
+        .map((source) => _buildSourceDropdownItem(source))
+        .toList();
 
-    List<DropdownItem> items = [downloadedItem, ...sourceItems];
+    final items = <DropdownItem>[downloadedItem];
+    if (favoriteItems.isNotEmpty) {
+      items.add(const DropdownItem.section(
+        value: '__top_sources__',
+        text: 'MOST USED',
+      ));
+      items.addAll(favoriteItems);
+      items.add(const DropdownItem.section(
+        value: '__all_sources__',
+        text: 'ALL SOURCES',
+      ));
+    }
+    items.addAll(regularItems);
 
     DropdownItem? selectedItem;
     if (_usingDownloadedSource.value) {
@@ -226,22 +264,10 @@ class _EpisodeSectionState extends State<EpisodeSection> {
     } else {
       final activeSource = sourceController.activeSource.value;
       if (activeSource != null) {
-        final isMangayomi =
-            activeSource.extensionType == ExtensionType.mangayomi;
-
-        selectedItem = DropdownItem(
-          value: activeSource.id?.toString() ?? activeSource.name ?? 'unknown',
-          text: activeSource.name?.toUpperCase() ?? 'Unknown Source',
-          subtitle: activeSource.lang?.toUpperCase() ?? 'Unknown',
-          leadingIcon: NetworkSizedImage(
-            radius: 12,
-            imageUrl: isMangayomi
-                ? "https://raw.githubusercontent.com/kodjodevf/mangayomi/main/assets/app_icons/icon-red.png"
-                : 'https://aniyomi.org/img/logo-128px.png',
-            height: 20,
-            width: 20,
-          ),
-        );
+        final isFavorite =
+            favoriteIds.contains(activeSource.id?.toString() ?? '');
+        selectedItem = _buildSourceDropdownItem(activeSource,
+            highlighted: isFavorite);
       }
     }
 

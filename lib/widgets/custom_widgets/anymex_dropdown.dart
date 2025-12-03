@@ -280,22 +280,35 @@ class _AnymexDropdownState extends State<AnymexDropdown>
                                       return ListView.separated(
                                         shrinkWrap: true,
                                         itemCount: filteredItems.length,
-                                        separatorBuilder: (context, index) =>
-                                            Divider(
-                                          height: 1,
-                                          thickness: 0.5,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .outline
-                                              .withOpacity(0.1),
-                                          indent: 16,
-                                          endIndent: 16,
-                                        ),
+                                        separatorBuilder: (context, index) {
+                                          final current = filteredItems[index];
+                                          final next =
+                                              filteredItems[index + 1];
+                                          if (current.isSectionHeader ||
+                                              next.isSectionHeader) {
+                                            return const SizedBox.shrink();
+                                          }
+                                          return Divider(
+                                            height: 1,
+                                            thickness: 0.5,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outline
+                                                .withOpacity(0.1),
+                                            indent: 16,
+                                            endIndent: 16,
+                                          );
+                                        },
                                         itemBuilder: (context, index) {
                                           final item = filteredItems[index];
                                           final isSelected = widget
                                                   .selectedItem?.value ==
                                               item.value;
+
+                                          if (item.isSectionHeader) {
+                                            return _buildSectionHeader(
+                                                context, item.text);
+                                          }
 
                                           return Material(
                                             color: Colors.transparent,
@@ -324,7 +337,7 @@ class _AnymexDropdownState extends State<AnymexDropdown>
                                                           .colorScheme
                                                           .primary
                                                           .withOpacity(0.08)
-                                                      : null,
+                                                      : item.backgroundColor,
                                                 ),
                                                 child: Row(
                                                   children: [
@@ -627,6 +640,37 @@ class _AnymexDropdownState extends State<AnymexDropdown>
       ),
     );
   }
+
+    Widget _buildSectionHeader(BuildContext context, String label) {
+      final dividerColor = Theme.of(context)
+          .colorScheme
+          .outline
+          .withOpacity(0.2);
+      final textColor = Theme.of(context)
+          .colorScheme
+          .onSurface
+          .withOpacity(0.6);
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Expanded(child: Divider(color: dividerColor, thickness: 0.6)),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+                letterSpacing: 0.6,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: Divider(color: dividerColor, thickness: 0.6)),
+          ],
+        ),
+      );
+    }
 }
 
 class DropdownItem {
@@ -636,6 +680,8 @@ class DropdownItem {
   final Widget? leadingIcon;
   final Widget? trailingIcon;
   final Widget? extra;
+    final bool isSectionHeader;
+    final Color? backgroundColor;
 
   const DropdownItem({
     required this.value,
@@ -644,5 +690,16 @@ class DropdownItem {
     this.leadingIcon,
     this.trailingIcon,
     this.extra,
+      this.isSectionHeader = false,
+      this.backgroundColor,
   });
+
+    const DropdownItem.section({
+      required String value,
+      required String text,
+    }) : this(
+            value: value,
+            text: text,
+            isSectionHeader: true,
+          );
 }

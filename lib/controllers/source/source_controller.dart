@@ -60,6 +60,10 @@ class SourceController extends GetxController implements BaseService {
 
   final RxBool shouldShowExtensions = false.obs;
 
+  final Map<ItemType, Map<String, int>> _sourceUsage = {
+    for (final type in ItemType.values) type: <String, int>{},
+  };
+
   List<String> get activeAnimeRepo => _activeAnimeRepo;
   set activeAnimeRepo(List<String> value) {
     _activeAnimeRepo.assignAll(normalizeRepoList(value));
@@ -357,6 +361,8 @@ class SourceController extends GetxController implements BaseService {
         installedNovelExtensions,
       ].any((e) => e.isNotEmpty);
 
+      _loadSourceUsage();
+
       Logger.i('Extensions initialized.');
     } catch (e) {
       Logger.i('Error initializing extensions: $e');
@@ -404,6 +410,71 @@ class SourceController extends GetxController implements BaseService {
     if (prefs == null || sourceId == null || sourceId.isEmpty) return;
 
     prefs.put(_mediaSourceKey(type: type, media: media), sourceId);
+  }
+
+  String _usagePreferenceKey(ItemType type) => 'source_usage_${type.name}';
+
+  void _loadSourceUsage() {
+    final prefs = _getPreferenceBox();
+    if (prefs == null) return;
+    for (final type in ItemType.values) {
+      final raw = prefs.get(_usagePreferenceKey(type));
+      if (raw is Map) {
+        final sanitized = <String, int>{};
+        raw.forEach((key, value) {
+          final count = value is int ? value : int.tryParse(value.toString());
+          if (count != null) {
+            sanitized[key.toString()] = count;
+          }
+        });
+        _sourceUsage[type] = sanitized;
+      }
+    }
+  }
+
+  void _saveSourceUsage(ItemType type) {
+    final prefs = _getPreferenceBox();
+    if (prefs == null) return;
+    prefs.put(_usagePreferenceKey(type), _sourceUsage[type]);
+  }
+
+  void recordSourceUsage({required ItemType type, required Source source}) {
+    final sourceId = source.id?.toString();
+    if (sourceId == null || sourceId.isEmpty) return;
+    final usage = _sourceUsage[type] ?? <String, int>{};
+    usage[sourceId] = (usage[sourceId] ?? 0) + 1;
+    _sourceUsage[type] = usage;
+    _saveSourceUsage(type);
+  }
+
+  List<Source> getTopSources(ItemType type, {int limit = 5}) {
+    final usage = _sourceUsage[type] ?? const <String, int>{};
+    final installed = List<Source>.from(getInstalledExtensions(type));
+    installed.sort((a, b) {
+      final aCount = usage[a.id?.toString()] ?? 0;
+      final bCount = usage[b.id?.toString()] ?? 0;
+      if (bCount != aCount) {
+        return bCount.compareTo(aCount);
+      }
+      return (a.name ?? '').compareTo(b.name ?? '');
+    });
+    return installed
+        .where((source) => (usage[source.id?.toString()] ?? 0) > 0)
+        .take(limit)
+        .toList();
+  }
+
+  List<Source> getPrioritizedSources(ItemType type) {
+    final topSources = getTopSources(type);
+    final favoriteIds = topSources
+        .map((source) => source.id?.toString())
+        .whereType<String>()
+        .toSet();
+    final others = getInstalledExtensions(type)
+        .where((source) =>
+            !favoriteIds.contains(source.id?.toString() ?? ''))
+        .toList();
+    return [...topSources, ...others];
   }
 
   Source? applyStoredSourceSelection({
@@ -472,14 +543,41 @@ class SourceController extends GetxController implements BaseService {
   }
 
   Source? cycleToNextSource(ItemType type) {
-    final sources = getInstalledExtensions(type);
-    if (sources.isEmpty) return null;
+    final sources = getPrioritizedSources(type);
+    if (sources.length <= 1) return null;
+
+    final favorites = getTopSources(type);
+    final favoriteIds = favorites
+        .map((source) => source.id?.toString())
+        .whereType<String>()
+        .toSet();
 
     final current = getActiveSourceForType(type);
-    final currentIndex = current != null ? sources.indexOf(current) : -1;
-    final nextIndex = (currentIndex + 1) % sources.length;
+    final currentId = current?.id?.toString();
+    final currentIndex = currentId == null
+        ? -1
+        : sources.indexWhere((source) => source.id?.toString() == currentId);
+
+    int nextIndex;
+    if (currentIndex == -1) {
+      nextIndex = 0;
+    } else if (!favoriteIds.contains(currentId ?? '') &&
+        favorites.isNotEmpty) {
+      nextIndex = 0;
+      if (sources[nextIndex].id?.toString() == currentId) {
+        nextIndex = (nextIndex + 1) % sources.length;
+      }
+    } else {
+      nextIndex = (currentIndex + 1) % sources.length;
+    }
+
     final nextSource = sources[nextIndex];
+    if (nextSource.id?.toString() == currentId) {
+      return null;
+    }
+
     _setActiveSourceForType(type, nextSource);
+    recordSourceUsage(type: type, source: nextSource);
     return nextSource;
   }
 
