@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:anymex/widgets/common/glow.dart';
 import 'package:flutter/material.dart';
 
@@ -20,6 +22,9 @@ class CustomSlider extends StatefulWidget {
   final Color? activeColor;
   final Color? inactiveColor;
   final bool disableMinMax;
+  final double? resetValue;
+  final Duration resetHoldDuration;
+  final bool enableLongPressReset;
   const CustomSlider({
     super.key,
     required this.onChanged,
@@ -40,6 +45,9 @@ class CustomSlider extends StatefulWidget {
     this.activeColor,
     this.inactiveColor,
     this.disableMinMax = false,
+    this.resetValue,
+    this.resetHoldDuration = const Duration(milliseconds: 1800),
+    this.enableLongPressReset = true,
   });
 
   @override
@@ -47,6 +55,78 @@ class CustomSlider extends StatefulWidget {
 }
 
 class CustomSliderState extends State<CustomSlider> {
+  late double _baselineValue;
+  Timer? _resetTimer;
+  bool _isDragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _baselineValue = widget.resetValue ?? widget.value;
+  }
+
+  @override
+  void didUpdateWidget(CustomSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.resetValue != null &&
+        widget.resetValue != oldWidget.resetValue) {
+      _baselineValue = widget.resetValue!;
+    } else if (widget.resetValue == null &&
+        !_isDragging &&
+        oldWidget.value == _baselineValue &&
+        widget.value != oldWidget.value) {
+      _baselineValue = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _cancelResetTimer();
+    super.dispose();
+  }
+
+  void _handleSliderChanged(double value) {
+    _cancelResetTimer();
+    widget.onChanged(value);
+  }
+
+  void _handleChangeStart(double value) {
+    _isDragging = true;
+    _startResetTimer();
+    widget.onDragStart?.call(value);
+  }
+
+  void _handleChangeEnd(double value) {
+    _isDragging = false;
+    _cancelResetTimer();
+    widget.onDragEnd?.call(value);
+  }
+
+  void _startResetTimer() {
+    if (!widget.enableLongPressReset) return;
+    _resetTimer?.cancel();
+    _resetTimer = Timer(widget.resetHoldDuration, _resetToBaseline);
+  }
+
+  void _cancelResetTimer() {
+    _resetTimer?.cancel();
+    _resetTimer = null;
+  }
+
+  void _resetToBaseline() {
+    final target = widget.resetValue ?? _baselineValue;
+    final resolvedValue = widget.disableMinMax
+        ? target
+        : _clampValue(target, widget.min ?? 0, widget.max ?? 1);
+    if ((widget.value - resolvedValue).abs() < 0.0001) return;
+    widget.onChanged(resolvedValue);
+  }
+
+  double _clampValue(double value, double min, double max) {
+    return value.clamp(min, max);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -58,9 +138,9 @@ class CustomSliderState extends State<CustomSlider> {
       child: widget.disableMinMax
           ? Slider(
               focusNode: widget.focusNode,
-              onChanged: widget.onChanged,
-              onChangeStart: widget.onDragStart,
-              onChangeEnd: widget.onDragEnd,
+              onChanged: _handleSliderChanged,
+              onChangeStart: _handleChangeStart,
+              onChangeEnd: _handleChangeEnd,
               divisions: widget.divisions,
               value: widget.value,
               label: widget.label ?? widget.value.toString(),
@@ -70,9 +150,9 @@ class CustomSliderState extends State<CustomSlider> {
               focusNode: widget.focusNode,
               min: widget.min ?? 0,
               max: widget.max ?? 100,
-              onChanged: widget.onChanged,
-              onChangeStart: widget.onDragStart,
-              onChangeEnd: widget.onDragEnd,
+              onChanged: _handleSliderChanged,
+              onChangeStart: _handleChangeStart,
+              onChangeEnd: _handleChangeEnd,
               divisions: widget.divisions,
               value: widget.value,
               label: widget.label ?? widget.value.toString(),
