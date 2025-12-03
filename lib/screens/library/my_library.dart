@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/controllers/offline/offline_storage_controller.dart';
 import 'package:anymex/controllers/service_handler/service_handler.dart';
@@ -5,7 +7,9 @@ import 'package:anymex/controllers/settings/settings.dart';
 import 'package:anymex/controllers/source/source_controller.dart';
 import 'package:anymex/models/Media/media.dart';
 import 'package:anymex/models/Offline/Hive/chapter.dart';
+import 'package:anymex/models/Offline/Hive/episode.dart';
 import 'package:anymex/models/Offline/Hive/offline_media.dart';
+import 'package:anymex/models/Offline/Hive/video.dart' as hive;
 import 'package:anymex/screens/anime/details_page.dart';
 import 'package:anymex/screens/library/editor/list_editor.dart';
 import 'package:anymex/screens/library/widgets/history_model.dart';
@@ -13,6 +17,7 @@ import 'package:anymex/screens/library/widgets/library_deps.dart';
 import 'package:anymex/screens/manga/details_page.dart';
 import 'package:anymex/screens/manga/reading_page.dart';
 import 'package:anymex/screens/novel/details/details_view.dart';
+import 'package:anymex/screens/local_source/player/offline_player.dart';
 import 'package:anymex/screens/settings/widgets/history_card_gate.dart';
 import 'package:anymex/screens/settings/widgets/history_card_selector.dart';
 import 'package:anymex/utils/extension_utils.dart';
@@ -80,6 +85,35 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
     _refresh();
   }
 
+  File? _resolveEpisodeFile(DownloadedEpisode episode) {
+    final explicitPath = episode.filePath;
+    if (explicitPath != null && explicitPath.isNotEmpty) {
+      final explicitFile = File(explicitPath);
+      if (explicitFile.existsSync()) {
+        return explicitFile;
+      }
+    }
+
+    try {
+      final candidates = episode.directory
+          .listSync()
+          .whereType<File>()
+          .where((file) {
+        final lowerPath = file.path.toLowerCase();
+        return lowerPath.endsWith('.mp4') ||
+            lowerPath.endsWith('.mkv') ||
+            lowerPath.endsWith('.webm') ||
+            lowerPath.endsWith('.mov');
+      }).toList();
+      if (candidates.isNotEmpty) {
+        return candidates.first;
+      }
+    } catch (_) {
+      // Directory may no longer exist; handled by caller.
+    }
+    return null;
+  }
+
   void _openChapterFromGroup(
       _ChapterDownloadGroup group, DownloadedChapter chapter) {
     final media = Media(
@@ -126,6 +160,62 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
         ));
   }
 
+  void _openEpisodeFromGroup(
+      _EpisodeDownloadGroup group, DownloadedEpisode episode) {
+    final file = _resolveEpisodeFile(episode);
+    if (file == null) {
+      errorSnackBar(
+          'Offline file missing for episode ${episode.episodeNumber}.');
+      return;
+    }
+
+    final subtitleTracksRaw = episode.subtitles
+        .where((subtitle) =>
+            subtitle.path.isNotEmpty && File(subtitle.path).existsSync())
+        .map((subtitle) => hive.Track(
+              file: Uri.file(subtitle.path).toString(),
+              label: subtitle.displayLabel,
+            ))
+        .toList();
+    final subtitleTracks =
+        subtitleTracksRaw.isEmpty ? null : subtitleTracksRaw;
+
+    final folderName = group.mediaTitle.trim().isEmpty
+        ? 'Downloads'
+        : group.mediaTitle;
+    final episodeTitle = episode.title?.isNotEmpty == true
+        ? episode.title!
+        : 'Episode ${episode.episodeNumber}';
+
+    final offlineEpisode = LocalEpisode(
+      folderName: folderName,
+      name: episodeTitle,
+      path: file.path,
+    );
+
+    final media = Media(
+      id: group.mediaId,
+      title: group.mediaTitle,
+      romajiTitle: group.mediaTitle,
+      serviceType: ServicesType.simkl,
+    );
+
+    final episodeMeta = Episode(
+      number: episode.episodeNumber,
+      link: file.path,
+      title: episodeTitle,
+    );
+
+    navigate(() => OfflineWatchPage(
+          episode: offlineEpisode,
+          episodeList: const [],
+          currentEpisodeData: episodeMeta,
+          episodeCatalog: const [],
+          anilistData: media,
+          subtitleTracks: subtitleTracks,
+        ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -155,6 +245,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
                   onDeleteEpisode: _deleteEpisode,
                   onDeleteChapter: _deleteChapter,
                   onRefresh: _refresh,
+                  onOpenEpisode: _openEpisodeFromGroup,
                 ),
                 const SizedBox(height: 12),
                 _DownloadsSummaryCard<DownloadedChapter>(
@@ -312,6 +403,7 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
     required this.onDeleteEpisode,
     required this.onDeleteChapter,
     this.onOpenChapter,
+    this.onOpenEpisode,
   });
 
   final String title;
@@ -322,6 +414,7 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
   final Future<void> Function(DownloadedEpisode) onDeleteEpisode;
   final Future<void> Function(DownloadedChapter) onDeleteChapter;
   final void Function(_ChapterDownloadGroup, DownloadedChapter)? onOpenChapter;
+  final void Function(_EpisodeDownloadGroup, DownloadedEpisode)? onOpenEpisode;
 
   String get _summaryLabel {
     final buffer = StringBuffer();
@@ -393,6 +486,9 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
                     return _EpisodeGroupTile(
                       group: group,
                       onDelete: onDeleteEpisode,
+                      onOpen: onOpenEpisode == null
+                          ? null
+                          : (episode) => onOpenEpisode!(group, episode),
                     );
                   }
                   if (group is _ChapterDownloadGroup) {
@@ -463,37 +559,12 @@ class _ActiveDownloadsCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                    HoldToCancelDetector(
-                      tooltip: 'Hold 2s to cancel download',
-                      overlayRadius: BorderRadius.circular(8),
-                      progressColor: Theme.of(context).colorScheme.error,
-                      enabled: onCancel != null,
-                      onConfirmed: () async {
-                        if (onCancel != null) {
-                          await onCancel!(entry.key);
-                        }
-                      },
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: LinearProgressIndicator(
-                          minHeight: 6,
-                          value: progress,
-                          backgroundColor:
-                              Theme.of(context).colorScheme.surfaceVariant,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                        ),
-                        Text(
-                          percentLabel,
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                      ],
+                    Text(
+                      headline,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
                     ),
                     if (detail?.isNotEmpty == true)
                       Padding(
@@ -509,15 +580,44 @@ class _ActiveDownloadsCard extends StatelessWidget {
                         ),
                       ),
                     const SizedBox(height: 6),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: LinearProgressIndicator(
-                        minHeight: 6,
-                        value: progress,
-                        backgroundColor:
-                            Theme.of(context).colorScheme.surfaceVariant,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: HoldToCancelDetector(
+                            tooltip: 'Hold 2s to cancel download',
+                            overlayRadius: BorderRadius.circular(8),
+                            progressColor:
+                                Theme.of(context).colorScheme.error,
+                            enabled: onCancel != null,
+                            onConfirmed: () async {
+                              if (onCancel != null) {
+                                await onCancel!(entry.key);
+                              }
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                minHeight: 6,
+                                value: progress,
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceVariant,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          percentLabel,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -534,10 +634,12 @@ class _EpisodeGroupTile extends StatelessWidget {
   const _EpisodeGroupTile({
     required this.group,
     required this.onDelete,
+    this.onOpen,
   });
 
   final _EpisodeDownloadGroup group;
   final Future<void> Function(DownloadedEpisode) onDelete;
+  final void Function(DownloadedEpisode)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -556,6 +658,7 @@ class _EpisodeGroupTile extends StatelessWidget {
       children: group.entries.map((entry) {
         return ListTile(
           contentPadding: EdgeInsets.zero,
+          onTap: onOpen == null ? null : () => onOpen!(entry),
           title: Text('Episode ${entry.episodeNumber}'),
           subtitle: entry.title?.isNotEmpty == true
               ? Text(entry.title!, maxLines: 1, overflow: TextOverflow.ellipsis)
