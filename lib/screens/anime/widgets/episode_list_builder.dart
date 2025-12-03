@@ -21,6 +21,7 @@ import 'package:anymex/utils/function.dart';
 import 'package:anymex/utils/string_extensions.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_button.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_chip.dart';
+import 'package:anymex/widgets/common/hold_to_cancel_detector.dart';
 import 'package:anymex/widgets/header.dart';
 import 'package:anymex/widgets/helper/platform_builder.dart';
 import 'package:anymex/widgets/custom_widgets/custom_text.dart';
@@ -295,6 +296,15 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
                                 ? () =>
                                     _openDownloadedEpisode(episode, downloadEntry)
                                 : () => _downloadEpisode(episode),
+                            onCancel: widget.anilistData == null
+                                ? null
+                                : () async {
+                                    await _downloadController
+                                        .cancelEpisodeDownload(
+                                      widget.anilistData!.id,
+                                      episode.number,
+                                    );
+                                  },
                           ),
                         ),
                     ],
@@ -494,37 +504,48 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
       {required bool isDownloaded,
       required bool isDownloading,
       double? progress,
-      required VoidCallback onTap}) {
+      required VoidCallback onTap,
+      Future<void> Function()? onCancel}) {
     if (isDownloading) {
       final percent = progress != null ? (progress * 100).clamp(0, 100) : null;
-      return Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
-          shape: BoxShape.circle,
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            SizedBox(
-              width: 34,
-              height: 34,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: Theme.of(context).colorScheme.primary,
-                value: progress,
+      return HoldToCancelDetector(
+        tooltip: 'Hold 2s to cancel download',
+        onConfirmed: () async {
+          if (onCancel != null) {
+            await onCancel();
+          }
+        },
+        overlayRadius: BorderRadius.circular(9999),
+        progressColor: Theme.of(context).colorScheme.error,
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+            shape: BoxShape.circle,
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                width: 34,
+                height: 34,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: Theme.of(context).colorScheme.primary,
+                  value: progress,
+                ),
               ),
-            ),
-            if (percent != null)
-              Text(
-                '${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}%',
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-          ],
+              if (percent != null)
+                Text(
+                  '${percent.toStringAsFixed(percent >= 10 ? 0 : 1)}%',
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+            ],
+          ),
         ),
       );
     }

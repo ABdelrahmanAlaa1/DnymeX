@@ -43,6 +43,9 @@ class DownloadController extends GetxController {
       <String, DownloadProgressContext>{}.obs;
   RxMap<String, DownloadProgressContext> get progressContexts => _progressContexts;
 
+  final Rx<Set<String>> _cancelRequests = Rx<Set<String>>({});
+  final Map<String, Set<CancelToken>> _activeCancelTokens = {};
+
   double? getEpisodeProgress(String mediaId, String episodeNumber) {
     return _progress[_downloadKey(
         type: ItemType.anime, mediaId: mediaId, number: _episodeKeyValue(episodeNumber))];
@@ -73,6 +76,86 @@ class DownloadController extends GetxController {
   void _removeContext(String key) {
     if (_progressContexts.remove(key) != null) {
       _progressContexts.refresh();
+    }
+  }
+
+  Future<bool> cancelActiveDownload(String key) async {
+    return _requestCancellation(key, showFeedback: true);
+  }
+
+  Future<bool> cancelEpisodeDownload(String mediaId, String episodeNumber) {
+    final key = _downloadKey(
+      type: ItemType.anime,
+      mediaId: mediaId,
+      number: _episodeKeyValue(episodeNumber),
+    );
+    return _requestCancellation(key, showFeedback: true);
+  }
+
+  Future<bool> cancelChapterDownload(String mediaId, num? chapterNumber) {
+    if (chapterNumber == null) return Future.value(false);
+    final key = _downloadKey(
+      type: ItemType.manga,
+      mediaId: mediaId,
+      number: chapterNumber,
+    );
+    return _requestCancellation(key, showFeedback: true);
+  }
+
+  Future<bool> _requestCancellation(String key, {bool showFeedback = false}) async {
+    if (!_activeDownloads.value.contains(key)) {
+      if (showFeedback) {
+        infoSnackBar('Download already finished.');
+      }
+      return false;
+    }
+
+    final set = _cancelRequests.value;
+    if (set.add(key)) {
+      _cancelRequests.refresh();
+      final tokens = _activeCancelTokens[key];
+      if (tokens != null) {
+        for (final token in tokens.toList()) {
+          if (!token.isCancelled) {
+            token.cancel('cancelled');
+          }
+        }
+      }
+      if (showFeedback) {
+        infoSnackBar('Canceling download…');
+      }
+    } else if (showFeedback) {
+      infoSnackBar('Cancellation already requested.');
+    }
+
+    return true;
+  }
+
+  void _registerCancelToken(String key, CancelToken token) {
+    final set = _activeCancelTokens.putIfAbsent(key, () => <CancelToken>{});
+    set.add(token);
+  }
+
+  void _releaseCancelToken(String key, CancelToken token) {
+    final set = _activeCancelTokens[key];
+    if (set == null) return;
+    set.remove(token);
+    if (set.isEmpty) {
+      _activeCancelTokens.remove(key);
+    }
+  }
+
+  void _clearCancellationState(String key) {
+    final set = _cancelRequests.value;
+    if (set.remove(key)) {
+      _cancelRequests.refresh();
+    }
+    _activeCancelTokens.remove(key);
+  }
+
+  void _throwIfCancelled(String key) {
+    if (_cancelRequests.value.contains(key)) {
+      throw DownloadCancelledException(key);
     }
   }
 
@@ -218,8 +301,10 @@ class DownloadController extends GetxController {
     final chapterNumber = chapter.number ?? 0;
     final trackingKey =
         _downloadKey(type: ItemType.manga, mediaId: media.id, number: chapterNumber);
+    _clearCancellationState(trackingKey);
     _addActiveDownload(trackingKey);
     try {
+      _throwIfCancelled(trackingKey);
       final link = chapter.link;
       if (link == null || link.isEmpty) {
         errorSnackBar('Missing chapter link for download.');
@@ -232,6 +317,8 @@ class DownloadController extends GetxController {
         errorSnackBar('No manga source selected.');
         return;
       }
+
+      _throwIfCancelled(trackingKey);
 
       final dir = await _ensureChapterDir(media, chapter);
       final metaFile = File(p.join(dir.path, 'meta.json'));
@@ -249,11 +336,14 @@ class DownloadController extends GetxController {
         return;
       }
 
+      _throwIfCancelled(trackingKey);
+
       final pageTasks = _buildChapterTasks(pageList, dir);
       final failedTasks = <_ChapterPageTask>[];
       _updateProgress(trackingKey, 0.0);
 
       for (final task in pageTasks) {
+        _throwIfCancelled(trackingKey);
         final success = await _attemptPrimaryPageDownload(task, trackingKey);
         if (!success) {
           Logger.i('Queued page ${task.index + 1} for fallback capture.');
@@ -304,12 +394,15 @@ class DownloadController extends GetxController {
       await metaFile.writeAsString(jsonEncode(metadata));
       successSnackBar('Chapter saved for offline reading.');
       await refreshChapterCache(media.id);
+    } on DownloadCancelledException {
+      infoSnackBar('Download canceled.');
     } catch (e, stackTrace) {
       errorSnackBar('Failed to download chapter: $e');
       Logger.i(stackTrace.toString());
     } finally {
       _clearProgress(trackingKey);
       _removeActiveDownload(trackingKey);
+      _clearCancellationState(trackingKey);
     }
   }
 
@@ -317,14 +410,21 @@ class DownloadController extends GetxController {
     String url,
     File targetFile, {
     Map<String, String>? headers,
+    required String cancelKey,
   }) async {
     int retries = 0;
     const maxRetries = 3;
     
     while (retries < maxRetries) {
+      _throwIfCancelled(cancelKey);
       try {
         // Strategy 1: Direct Dio
-        await _downloadBinary(url, targetFile, headers: headers);
+        await _downloadBinary(
+          url,
+          targetFile,
+          headers: headers,
+          cancelKey: cancelKey,
+        );
         return;
       } catch (e) {
         Logger.i('Strategy 1 (Dio) failed for $url: $e');
@@ -336,7 +436,12 @@ class DownloadController extends GetxController {
         if (!newHeaders.containsKey('User-Agent')) {
           newHeaders['User-Agent'] = _fallbackUserAgent;
         }
-        await _downloadBinary(url, targetFile, headers: newHeaders);
+        await _downloadBinary(
+          url,
+          targetFile,
+          headers: newHeaders,
+          cancelKey: cancelKey,
+        );
         return;
       } catch (e) {
         Logger.i('Strategy 2 (UA) failed for $url: $e');
@@ -344,7 +449,11 @@ class DownloadController extends GetxController {
 
       try {
         // Strategy 3: temp cached capture
-        final file = await getNetworkImageFile(url, headers: headers);
+        final file = await getNetworkImageFile(
+          url,
+          headers: headers,
+          cancelKey: cancelKey,
+        );
         await file.copy(targetFile.path);
         return;
       } catch (e) {
@@ -353,6 +462,7 @@ class DownloadController extends GetxController {
 
       retries++;
       if (retries < maxRetries) {
+        _throwIfCancelled(cancelKey);
         await Future.delayed(const Duration(seconds: 1));
       }
     }
@@ -371,6 +481,7 @@ class DownloadController extends GetxController {
       mediaId: media.id,
       number: _episodeKeyValue(episode.number),
     );
+    _clearCancellationState(trackingKey);
     _addActiveDownload(trackingKey);
     _registerContext(
       trackingKey,
@@ -384,6 +495,7 @@ class DownloadController extends GetxController {
     );
     _updateProgress(trackingKey, 0.0);
     try {
+      _throwIfCancelled(trackingKey);
       final link = episode.link;
       if (link == null || link.isEmpty) {
         errorSnackBar('Missing episode link.');
@@ -397,6 +509,7 @@ class DownloadController extends GetxController {
         return;
       }
 
+      _throwIfCancelled(trackingKey);
       final dir = await _ensureEpisodeDir(media, episode);
       final metaFile = File(p.join(dir.path, 'meta.json'));
       if (await metaFile.exists()) {
@@ -417,6 +530,8 @@ class DownloadController extends GetxController {
         }
         selected = _selectBestVideo(videos);
       }
+
+      _throwIfCancelled(trackingKey);
       final extension = _inferExtension(selected.url, fallback: '.mp4');
       final target = File(p.join(dir.path, 'episode$extension'));
 
@@ -436,6 +551,7 @@ class DownloadController extends GetxController {
             if (total == -1) return;
             _updateProgress(trackingKey, received / total);
           },
+          cancelKey: trackingKey,
         );
         _updateProgress(trackingKey, 1.0);
       }
@@ -457,6 +573,8 @@ class DownloadController extends GetxController {
       await metaFile.writeAsString(jsonEncode(metadata));
       successSnackBar('Episode saved for offline playback.');
       await refreshEpisodeCache(media.id);
+    } on DownloadCancelledException {
+      infoSnackBar('Download canceled.');
     } catch (e, stackTrace) {
       errorSnackBar('Failed to download episode: $e');
       Logger.i(stackTrace.toString());
@@ -464,6 +582,7 @@ class DownloadController extends GetxController {
       _clearProgress(trackingKey);
       _removeContext(trackingKey);
       _removeActiveDownload(trackingKey);
+      _clearCancellationState(trackingKey);
     }
   }
 
@@ -652,10 +771,12 @@ class DownloadController extends GetxController {
   Future<bool> _attemptPrimaryPageDownload(
       _ChapterPageTask task, String trackingKey) async {
     try {
+      _throwIfCancelled(trackingKey);
       await _downloadImageWithStrategies(
         task.page.url,
         task.targetFile,
         headers: task.page.headers,
+        cancelKey: trackingKey,
       );
       return true;
     } catch (e, stackTrace) {
@@ -674,11 +795,13 @@ class DownloadController extends GetxController {
     final stillFailed = <_ChapterPageTask>[];
 
     for (final task in failedPages) {
+      _throwIfCancelled(trackingKey);
       try {
         final bustedUrl = _appendCacheBuster(task.page.url);
         final file = await getNetworkImageFile(
           bustedUrl,
           headers: _buildFallbackHeaders(task.page.headers),
+          cancelKey: trackingKey,
         );
         await file.copy(task.targetFile.path);
       } catch (e, stackTrace) {
@@ -703,11 +826,13 @@ class DownloadController extends GetxController {
 
     infoSnackBar('Falling back to full chapter capture…');
     for (final task in tasks) {
+      _throwIfCancelled(trackingKey);
       try {
         final bustedUrl = _appendCacheBuster(task.page.url);
         final file = await getNetworkImageFile(
           bustedUrl,
           headers: _buildFallbackHeaders(task.page.headers),
+          cancelKey: trackingKey,
         );
         await file.copy(task.targetFile.path);
       } catch (e, stackTrace) {
@@ -737,24 +862,47 @@ class DownloadController extends GetxController {
 
   Future<void> _downloadBinary(String url, File file,
       {Map<String, String>? headers,
-      void Function(int received, int total)? onProgress}) async {
-    final response = await _dio.get<List<int>>(
-      url,
-      options: Options(
-        responseType: ResponseType.bytes,
-        followRedirects: true,
-        headers: headers,
-      ),
-      onReceiveProgress: (received, total) {
-        onProgress?.call(received, total);
-      },
-    );
-    await file.writeAsBytes(response.data!);
+      void Function(int received, int total)? onProgress,
+      String? cancelKey}) async {
+    CancelToken? cancelToken;
+    if (cancelKey != null) {
+      _throwIfCancelled(cancelKey);
+      cancelToken = CancelToken();
+      _registerCancelToken(cancelKey, cancelToken);
+    }
+
+    try {
+      final response = await _dio.get<List<int>>(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          followRedirects: true,
+          headers: headers,
+        ),
+        cancelToken: cancelToken,
+        onReceiveProgress: (received, total) {
+          onProgress?.call(received, total);
+        },
+      );
+      await file.writeAsBytes(response.data!);
+    } on DioException catch (e) {
+      if (cancelKey != null &&
+          (cancelToken?.isCancelled == true ||
+              e.type == DioExceptionType.cancel)) {
+        throw DownloadCancelledException(cancelKey);
+      }
+      rethrow;
+    } finally {
+      if (cancelKey != null && cancelToken != null) {
+        _releaseCancelToken(cancelKey, cancelToken);
+      }
+    }
   }
 
   Future<File> getNetworkImageFile(
     String url, {
     Map<String, String>? headers,
+    String? cancelKey,
   }) async {
     final tempDir = await getTemporaryDirectory();
     final cacheDir = Directory(p.join(tempDir.path, 'anymex_image_cache'));
@@ -780,7 +928,12 @@ class DownloadController extends GetxController {
     }
 
     try {
-      await _downloadBinary(url, tempFile, headers: headers);
+      await _downloadBinary(
+        url,
+        tempFile,
+        headers: headers,
+        cancelKey: cancelKey,
+      );
       await tempFile.rename(file.path);
       return file;
     } catch (e) {
@@ -794,7 +947,11 @@ class DownloadController extends GetxController {
 
   Future<void> _downloadHlsPlaylist(String playlistUrl, Directory targetDir,
       {Map<String, String>? headers, String? progressKey}) async {
-    final playlistContent = await _fetchPlaylist(playlistUrl, headers: headers);
+    final playlistContent = await _fetchPlaylist(
+      playlistUrl,
+      headers: headers,
+      cancelKey: progressKey,
+    );
     final lines = LineSplitter.split(playlistContent).toList();
     final totalSegments =
         lines.where((line) => !_isCommentOrEmpty(line)).length;
@@ -808,6 +965,9 @@ class DownloadController extends GetxController {
         continue;
       }
 
+      if (progressKey != null) {
+        _throwIfCancelled(progressKey);
+      }
       final absolute = _resolveUrl(playlistUrl, trimmed);
       final ext = _inferExtension(absolute, fallback: '.ts');
       final segmentName =
@@ -823,6 +983,7 @@ class DownloadController extends GetxController {
           _updateProgress(
               progressKey, (completedSegments + segmentFraction) / totalSegments);
         },
+        cancelKey: progressKey,
       );
       completedSegments++;
       if (progressKey != null && totalSegments > 0) {
@@ -843,22 +1004,48 @@ class DownloadController extends GetxController {
     return line.isEmpty || line.startsWith('#');
   }
 
-  Future<String> _fetchPlaylist(String url, {Map<String, String>? headers}) async {
-    final response = await _dio.get<String>(
-      url,
-      options: Options(
-        responseType: ResponseType.plain,
-        headers: headers,
-      ),
-    );
-    final data = response.data ?? '';
-    if (data.contains('#EXT-X-STREAM-INF')) {
-      final selectedUrl = _selectVariantPlaylist(data, url);
-      if (selectedUrl != null && selectedUrl != url) {
-        return _fetchPlaylist(selectedUrl, headers: headers);
+  Future<String> _fetchPlaylist(String url,
+      {Map<String, String>? headers, String? cancelKey}) async {
+    CancelToken? cancelToken;
+    if (cancelKey != null) {
+      _throwIfCancelled(cancelKey);
+      cancelToken = CancelToken();
+      _registerCancelToken(cancelKey, cancelToken);
+    }
+
+    try {
+      final response = await _dio.get<String>(
+        url,
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: headers,
+        ),
+        cancelToken: cancelToken,
+      );
+      final data = response.data ?? '';
+      if (data.contains('#EXT-X-STREAM-INF')) {
+        final selectedUrl = _selectVariantPlaylist(data, url);
+        if (selectedUrl != null && selectedUrl != url) {
+          return _fetchPlaylist(
+            selectedUrl,
+            headers: headers,
+            cancelKey: cancelKey,
+          );
+        }
+      }
+      return data;
+    } on DioException catch (e) {
+      if (cancelKey != null &&
+          (cancelToken?.isCancelled == true ||
+              e.type == DioExceptionType.cancel)) {
+        throw DownloadCancelledException(cancelKey);
+      }
+      rethrow;
+    } finally {
+      if (cancelKey != null && cancelToken != null) {
+        _releaseCancelToken(cancelKey, cancelToken);
       }
     }
-    return data;
   }
 
   String? _selectVariantPlaylist(String playlist, String baseUrl) {
@@ -1029,4 +1216,12 @@ class _VariantPlaylist {
   final int bandwidth;
 
   _VariantPlaylist({required this.url, required this.bandwidth});
+}
+
+class DownloadCancelledException implements Exception {
+  const DownloadCancelledException(this.key);
+  final String key;
+
+  @override
+  String toString() => 'Download cancelled: $key';
 }

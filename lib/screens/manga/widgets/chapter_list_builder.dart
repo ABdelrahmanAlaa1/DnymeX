@@ -14,6 +14,7 @@ import 'package:anymex/screens/manga/widgets/track_dialog.dart';
 import 'package:anymex/utils/function.dart';
 import 'package:anymex/utils/string_extensions.dart';
 import 'package:anymex/widgets/common/glow.dart';
+import 'package:anymex/widgets/common/hold_to_cancel_detector.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_button.dart';
 import 'package:anymex/widgets/header.dart';
 import 'package:anymex/widgets/helper/platform_builder.dart';
@@ -725,13 +726,25 @@ class ChapterListItem extends StatelessWidget {
     }
 
     if (isDownloading) {
-      return SizedBox(
-        width: 36,
-        height: 36,
-        child: CircularProgressIndicator(
-          value: downloadProgress,
-          strokeWidth: 2.5,
-          color: Theme.of(context).colorScheme.primary,
+      final downloadController = Get.find<DownloadController>();
+      return HoldToCancelDetector(
+        tooltip: 'Hold 2s to cancel download',
+        overlayRadius: BorderRadius.circular(12),
+        progressColor: Theme.of(context).colorScheme.error,
+        onConfirmed: () async {
+          await downloadController.cancelChapterDownload(
+            anilistData.id,
+            chapter.number,
+          );
+        },
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: CircularProgressIndicator(
+            value: downloadProgress,
+            strokeWidth: 2.5,
+            color: Theme.of(context).colorScheme.primary,
+          ),
         ),
       );
     }

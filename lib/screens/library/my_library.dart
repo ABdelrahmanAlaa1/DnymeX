@@ -32,6 +32,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:iconly/iconly.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:anymex/widgets/common/hold_to_cancel_detector.dart';
 
 enum SortType {
   title,
@@ -198,6 +199,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
               title: 'Active episode downloads',
               entries: episodeEntries,
               progressValues: progressSnapshot,
+              onCancel: (key) => _downloadController.cancelActiveDownload(key),
             ),
           if (mangaEntries.isNotEmpty) ...[
             if (episodeEntries.isNotEmpty) const SizedBox(height: 12),
@@ -205,6 +207,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
               title: 'Active manga downloads',
               entries: mangaEntries,
               progressValues: progressSnapshot,
+              onCancel: (key) => _downloadController.cancelActiveDownload(key),
             ),
           ],
           const SizedBox(height: 12),
@@ -416,11 +419,13 @@ class _ActiveDownloadsCard extends StatelessWidget {
     required this.title,
     required this.entries,
     required this.progressValues,
+    this.onCancel,
   });
 
   final String title;
   final List<MapEntry<String, DownloadProgressContext>> entries;
   final Map<String, double> progressValues;
+  final Future<void> Function(String key)? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -459,16 +464,27 @@ class _ActiveDownloadsCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            headline,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
+                    HoldToCancelDetector(
+                      tooltip: 'Hold 2s to cancel download',
+                      overlayRadius: BorderRadius.circular(8),
+                      progressColor: Theme.of(context).colorScheme.error,
+                      enabled: onCancel != null,
+                      onConfirmed: () async {
+                        if (onCancel != null) {
+                          await onCancel!(entry.key);
+                        }
+                      },
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: LinearProgressIndicator(
+                          minHeight: 6,
+                          value: progress,
+                          backgroundColor:
+                              Theme.of(context).colorScheme.surfaceVariant,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
                         ),
                         Text(
                           percentLabel,
