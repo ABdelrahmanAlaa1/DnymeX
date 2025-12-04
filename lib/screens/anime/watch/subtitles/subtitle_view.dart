@@ -71,9 +71,12 @@ class _SubtitleSearchBottomSheetState extends State<SubtitleSearchBottomSheet> {
       final results = await ImdbRepo.searchTitles(
           query ?? widget.controller.anilistData.title);
       _searchResults.assignAll(results);
+    } on ImdbApiException catch (e) {
+      Logger.w('IMDb search unavailable: ${e.message}');
+      _showError(e.message);
     } catch (e) {
       Logger.e('Search error: ${e.toString()}');
-      _showError('Search failed: ${e.toString()}');
+      _showError('Search failed. Please try again.');
     } finally {
       _isLoadingSearch.value = false;
     }

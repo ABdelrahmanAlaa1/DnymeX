@@ -18,7 +18,10 @@ class ImdbRepo {
 
       return results.map((e) => ImdbItem.fromJson(e)).toList();
     } else {
-      throw Exception('Failed to load IMDb data: ${res.statusCode}');
+      final message = res.statusCode >= 500
+          ? 'IMDb search is temporarily unavailable (HTTP ${res.statusCode}).'
+          : 'IMDb search failed (HTTP ${res.statusCode}).';
+      throw ImdbApiException(res.statusCode, message);
     }
   }
 
@@ -40,4 +43,14 @@ class ImdbRepo {
       return null;
     }
   }
+}
+
+class ImdbApiException implements Exception {
+  final int statusCode;
+  final String message;
+
+  ImdbApiException(this.statusCode, this.message);
+
+  @override
+  String toString() => message;
 }

@@ -566,9 +566,10 @@ class PlayerBottomSheets {
           subtitle: 'No subtitles',
           icon: Icons.subtitles_off,
         ),
-        ...filteredEmbedded.map(
-          (track) => BottomSheetItem(
-            title: _formatEmbeddedSubtitleLabel(track),
+        ...filteredEmbedded.asMap().entries.map(
+          (entry) => BottomSheetItem(
+            title: _formatEmbeddedSubtitleLabel(entry.value,
+                index: entry.key),
             subtitle: 'Embedded subtitle',
             icon: Icons.closed_caption_rounded,
           ),
@@ -734,27 +735,44 @@ class PlayerBottomSheets {
         file: Uri.file(file.path!).toString(),
         label: file.name,
       );
-
-      controller.externalSubs.value.insert(0, track);
-      controller.setExternalSub(track);
+  controller.addCustomSubtitleTrack(track);
     } catch (error) {
       snackBar('Failed to import subtitle.');
     }
   }
 
-  static String _formatEmbeddedSubtitleLabel(SubtitleTrack track) {
-    final language = track.language?.toUpperCase();
-    final title = track.title;
-    if ((language?.isNotEmpty ?? false) && (title?.isNotEmpty ?? false)) {
-      return '$language · $title';
+  static String _formatEmbeddedSubtitleLabel(SubtitleTrack track,
+      {int? index}) {
+    String? _clean(String? value) {
+      if (value == null) return null;
+      final text = value.trim();
+      if (text.isEmpty) return null;
+      final lowered = text.toLowerCase();
+      if (lowered == 'false' || lowered == 'true' || lowered == 'null') {
+        return null;
+      }
+      return text;
     }
-    if (language?.isNotEmpty ?? false) {
-      return language!;
+
+    final language = _clean(track.language?.toUpperCase());
+    final title = _clean(track.title);
+    final labelParts = <String>[];
+    if (language != null) labelParts.add(language);
+    if (title != null) labelParts.add(title);
+
+    if (labelParts.isNotEmpty) {
+      return labelParts.join(' · ');
     }
-    if (title?.isNotEmpty ?? false) {
-      return title!;
+
+    final uriLabel = track.uri?.toString();
+    if (uriLabel != null && uriLabel.isNotEmpty) {
+      return uriLabel;
     }
-    return track.uri?.toString() ?? 'Subtitle Track';
+
+    if (index != null) {
+      return 'Embedded track ${index + 1}';
+    }
+    return 'Embedded track';
   }
 
   static String _describeExternalSubtitle(Track track) {

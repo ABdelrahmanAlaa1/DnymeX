@@ -542,7 +542,7 @@ class SourceController extends GetxController implements BaseService {
     }
   }
 
-  Source? cycleToNextSource(ItemType type) {
+  Source? cycleToNextSource(ItemType type, {bool recordUsage = true}) {
     final sources = getPrioritizedSources(type);
     if (sources.length <= 1) return null;
 
@@ -577,7 +577,9 @@ class SourceController extends GetxController implements BaseService {
     }
 
     _setActiveSourceForType(type, nextSource);
-    recordSourceUsage(type: type, source: nextSource);
+    if (recordUsage) {
+      recordSourceUsage(type: type, source: nextSource);
+    }
     return nextSource;
   }
 

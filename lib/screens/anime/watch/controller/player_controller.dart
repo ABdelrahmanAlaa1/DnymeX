@@ -103,7 +103,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     );
 
     if (subtitleTracks?.isNotEmpty ?? false) {
-      controller.externalSubs.value = subtitleTracks!;
+      controller._setFetchedSubtitles(subtitleTracks!);
       final preferredTrack = subtitleTracks.firstWhereOrNull(
             (track) => track.label?.toLowerCase().contains('eng') ?? false,
           ) ??
@@ -163,6 +163,8 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   final Rxn<model.Video> selectedVideo = Rxn();
 
   final Rx<List<model.Track>> externalSubs = Rx([]);
+  final List<model.Track> _userSubtitleCache = [];
+  List<model.Track> _fetchedSubtitleCache = [];
 
   final Rx<bool> isSubtitlePaneOpened = false.obs;
   final Rx<bool> isEpisodePaneOpened = false.obs;
@@ -287,11 +289,19 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   }
 
   Future<DeviceOrientation> _getClosestLandscapeOrientation() async {
-    final event = await accelerometerEvents.first;
+    if (!(Platform.isAndroid || Platform.isIOS)) {
+      return DeviceOrientation.landscapeLeft;
+    }
 
-    return event.x > 0
-        ? DeviceOrientation.landscapeLeft
-        : DeviceOrientation.landscapeRight;
+    try {
+      final event = await accelerometerEvents.first;
+
+      return event.x > 0
+          ? DeviceOrientation.landscapeLeft
+          : DeviceOrientation.landscapeRight;
+    } catch (_) {
+      return DeviceOrientation.landscapeLeft;
+    }
   }
 
   void toggleOrientation() {
@@ -639,6 +649,40 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     }).toList();
   }
 
+  void _setFetchedSubtitles(List<model.Track> tracks) {
+    _fetchedSubtitleCache = List<model.Track>.from(tracks);
+    _rebuildExternalSubtitleList();
+  }
+
+  void _rebuildExternalSubtitleList() {
+    final seen = <String>{};
+    final merged = <model.Track>[
+      ..._userSubtitleCache,
+      ..._fetchedSubtitleCache,
+    ];
+
+    final deduped = <model.Track>[];
+    for (final track in merged) {
+      if ((track.file?.isEmpty ?? true) && (track.label?.isEmpty ?? true)) {
+        continue;
+      }
+
+      final key = _subtitleIdentity(track);
+      if (seen.add(key)) {
+        deduped.add(track);
+      }
+    }
+
+    externalSubs.value = deduped;
+  }
+
+  String _subtitleIdentity(model.Track track) =>
+      '${track.file ?? ''}|${track.label ?? ''}';
+
+  bool get _hasSubtitleSelection =>
+      (selectedExternalSub.value.file?.isNotEmpty ?? false) ||
+      selectedSubsTrack.value != null;
+
   int _subtitleComparator(model.Track a, model.Track b) {
     if (a.label == null || b.label == null) return -1;
     if (a.label == "English" && b.label != "English") return -1;
@@ -648,12 +692,13 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
 
   void _extractSubtitles() {
     Future.microtask(() {
-      externalSubs.value = _processSubtitles(episodeTracks);
+      _setFetchedSubtitles(_processSubtitles(episodeTracks));
 
-      if (externalSubs.value.isNotEmpty) {
-        final englishSub = externalSubs.value.firstWhereOrNull(
-          (e) => e.label?.toLowerCase().contains('eng') ?? false,
-        );
+      if (_fetchedSubtitleCache.isNotEmpty && !_hasSubtitleSelection) {
+        final englishSub = _fetchedSubtitleCache.firstWhereOrNull(
+              (e) => e.label?.toLowerCase().contains('eng') ?? false,
+            ) ??
+            _fetchedSubtitleCache.first;
         setExternalSub(englishSub);
       }
     });
@@ -915,6 +960,28 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     setSubtitleTrack(track);
   }
 
+  void addCustomSubtitleTrack(model.Track track,
+      {bool selectImmediately = true}) {
+    if (track.file?.isEmpty ?? true) {
+      snackBar('Corrupted Subtitle!');
+      return;
+    }
+
+    _userSubtitleCache
+        .removeWhere((existing) => _subtitleIdentity(existing) == _subtitleIdentity(track));
+    _userSubtitleCache.insert(0, track);
+
+    if (_userSubtitleCache.length > 10) {
+      _userSubtitleCache.removeRange(10, _userSubtitleCache.length);
+    }
+
+    _rebuildExternalSubtitleList();
+
+    if (selectImmediately) {
+      setExternalSub(track);
+    }
+  }
+
   void setServerTrack(model.Video track) async {
     if (track.url.isEmpty) {
       snackBar('Corrupted Quality!');
@@ -945,12 +1012,12 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   }
 
   void addOnlineSub(OnlineSubtitle sub) {
-    externalSubs.value.insert(
-        0,
-        model.Track(
-          label: '${sub.label} (Online)',
-          file: sub.url,
-        ));
+    addCustomSubtitleTrack(
+      model.Track(
+        label: '${sub.label} (Online)',
+        file: sub.url,
+      ),
+    );
   }
 
   void navigator(bool forward) {

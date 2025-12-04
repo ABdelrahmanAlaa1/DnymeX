@@ -32,6 +32,7 @@ import 'package:anymex/widgets/custom_widgets/custom_textspan.dart';
 import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:dartotsu_extension_bridge/dartotsu_extension_bridge.dart' as d;
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_progress.dart';
 import 'package:flutter/services.dart';
@@ -190,16 +191,24 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
   }
 
   Future<DeviceOrientation> _getClosestLandscapeOrientation() async {
-    final event = await accelerometerEvents.first;
-
-    double angle = math.atan2(event.y, event.x) * 180 / math.pi;
-
-    if (angle < 0) angle += 360;
-
-    if (angle >= 0 && angle < 180) {
+    if (!isMobile) {
       return DeviceOrientation.landscapeLeft;
-    } else {
-      return DeviceOrientation.landscapeRight;
+    }
+
+    try {
+      final event = await accelerometerEvents.first;
+
+      double angle = math.atan2(event.y, event.x) * 180 / math.pi;
+
+      if (angle < 0) angle += 360;
+
+      if (angle >= 0 && angle < 180) {
+        return DeviceOrientation.landscapeLeft;
+      } else {
+        return DeviceOrientation.landscapeRight;
+      }
+    } catch (_) {
+      return DeviceOrientation.landscapeLeft;
     }
   }
 
@@ -321,7 +330,9 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
         _lastUIUpdate = now;
         currentPosition.value = e;
         formattedTime.value = formatDuration(e);
-        Logger.i('UI Updated with accurate stream position: ${e.inSeconds}s');
+        if (kDebugMode) {
+          Logger.i('UI Updated with accurate stream position: ${e.inSeconds}s');
+        }
       }
 
       if (e.inSeconds >= episodeDuration.value.inSeconds - 1) {

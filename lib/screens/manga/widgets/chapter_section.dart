@@ -111,8 +111,8 @@ class _ChapterSectionState extends State<ChapterSection> {
     _fallbackTimer = Timer(const Duration(seconds: 40), () async {
       if (!mounted) return;
       if (widget.chapterList.value.isNotEmpty) return;
-      final next =
-          widget.sourceController.cycleToNextSource(ItemType.manga);
+        final next = widget.sourceController
+          .cycleToNextSource(ItemType.manga, recordUsage: false);
       if (next == null ||
           next.id == widget.sourceController.activeMangaSource.value?.id) {
         return;
@@ -154,89 +154,61 @@ class _ChapterSectionState extends State<ChapterSection> {
                     ),
                   ],
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: AnymexTextSpans(
-                        spans: [
-                          if (!widget.searchedTitle.value
-                                  .contains('Searching') &&
-                              !widget.searchedTitle.value
-                                  .contains('No Match Found'))
-                            AnymexTextSpan(
-                              text: "Found: ",
-                              size: 14,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withOpacity(0.6),
-                            ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isCompact = constraints.maxWidth < 520;
+                    final headerText = AnymexTextSpans(
+                      spans: [
+                        if (!widget.searchedTitle.value
+                                .contains('Searching') &&
+                            !widget.searchedTitle.value
+                                .contains('No Match Found'))
                           AnymexTextSpan(
-                            text: widget.searchedTitle.value,
-                            variant: TextVariant.semiBold,
+                            text: "Found: ",
                             size: 14,
-                            color: widget.searchedTitle.value
-                                    .contains('No Match Found')
-                                ? Theme.of(context).colorScheme.error
-                                : Theme.of(context).colorScheme.primary,
-                          )
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    AnymexOnTap(
-                      onTap: () {
-                        widget.showWrongTitleModal(
-                          context,
-                          widget.anilistData.title,
-                          (manga) async {
-                            widget.chapterList.value = [];
-                            await widget.getDetailsFromSource(
-                                Media.froDMedia(manga, ItemType.manga));
-                            final key =
-                                '${widget.sourceController.activeMangaSource.value?.id}-${widget.anilistData.id}-${widget.anilistData.serviceType.index}';
-                            settingsController.preferences
-                                .put(key, manga.title);
-                          },
-                          isManga: true,
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primaryContainer
-                              .withOpacity(0.4),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
                             color: Theme.of(context)
                                 .colorScheme
-                                .outline
-                                .withOpacity(0.3),
-                            width: 1,
+                                .onSurface
+                                .withOpacity(0.6),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.swap_horiz_rounded,
-                              size: 14,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 6),
-                            AnymexText(
-                              text: "Wrong Title?",
-                              size: 12,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+                        AnymexTextSpan(
+                          text: widget.searchedTitle.value,
+                          variant: TextVariant.semiBold,
+                          size: 14,
+                          color: widget.searchedTitle.value
+                                  .contains('No Match Found')
+                              ? Theme.of(context).colorScheme.error
+                              : Theme.of(context).colorScheme.primary,
+                        )
+                      ],
+                    );
+                    final cta = Align(
+                      alignment: isCompact
+                          ? Alignment.centerLeft
+                          : Alignment.centerRight,
+                      child: _buildWrongTitleButton(context),
+                    );
+
+                    if (isCompact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          headerText,
+                          const SizedBox(height: 12),
+                          cta,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(child: headerText),
+                        const SizedBox(width: 12),
+                        cta,
+                      ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 20),
@@ -273,6 +245,61 @@ class _ChapterSectionState extends State<ChapterSection> {
             ],
           ),
         ));
+  }
+
+  Widget _buildWrongTitleButton(BuildContext context) {
+    return AnymexOnTap(
+      onTap: () {
+        widget.showWrongTitleModal(
+          context,
+          widget.anilistData.title,
+          (manga) async {
+            widget.chapterList.value = [];
+            await widget.getDetailsFromSource(
+                Media.froDMedia(manga, ItemType.manga));
+            final key =
+                '${widget.sourceController.activeMangaSource.value?.id}-${widget.anilistData.id}-${widget.anilistData.serviceType.index}';
+            settingsController.preferences.put(key, manga.title);
+          },
+          isManga: true,
+        );
+      },
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 40),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Theme.of(context)
+                .colorScheme
+                .primaryContainer
+                .withOpacity(0.4),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color:
+                  Theme.of(context).colorScheme.outline.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.swap_horiz_rounded,
+                size: 16,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              AnymexText(
+                text: "Wrong Title?",
+                size: 12,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void openSourcePreferences(BuildContext context) {

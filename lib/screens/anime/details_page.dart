@@ -223,8 +223,9 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
 
       if (mappedData != null) break;
 
-      await Future.delayed(const Duration(milliseconds: 150));
-      final nextSource = sourceController.cycleToNextSource(ItemType.anime);
+        await Future.delayed(const Duration(milliseconds: 150));
+        final nextSource =
+          sourceController.cycleToNextSource(ItemType.anime, recordUsage: false);
 
       if (nextSource == null || nextSource.id == initialSourceId) {
         break;

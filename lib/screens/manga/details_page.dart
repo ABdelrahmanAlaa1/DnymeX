@@ -167,8 +167,9 @@ class _MangaDetailsPageState extends State<MangaDetailsPage> {
 
       if (mappedData != null) break;
 
-      await Future.delayed(const Duration(milliseconds: 150));
-      final nextSource = sourceController.cycleToNextSource(ItemType.manga);
+        await Future.delayed(const Duration(milliseconds: 150));
+        final nextSource =
+          sourceController.cycleToNextSource(ItemType.manga, recordUsage: false);
 
       if (nextSource == null || nextSource.id == initialSourceId) {
         break;
