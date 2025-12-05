@@ -722,6 +722,7 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
   }
 
   void setShaders(int key, {bool showMessage = true}) async {
+    final shaders = PlayerShaders.getShaders();
     if (key == -1) {
       PlayerShaders.setShaders(player, '');
       if (showMessage) {
@@ -729,7 +730,12 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
       }
       return;
     }
-    final shaders = PlayerShaders.getShaders();
+
+    if (key < 0 || key >= shaders.length) {
+      Logger.i('Shader index $key is out of range for ${shaders.length} profiles');
+      return;
+    }
+
     PlayerShaders.setShaders(player, shaders[key]);
     if (showMessage) {
       snackBar('Applied ${shaders[key]}');
@@ -756,11 +762,28 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
     }
 
     if (settings.preferences.get('shaders_enabled', defaultValue: false)) {
-      final keyLabel = key.keyLabel;
-      final allowedKeys = ["1", "2", "3", "4", "5", "6", "0"];
-      Logger.i(keyLabel);
-      if (allowedKeys.contains(keyLabel)) {
-        setShaders(int.parse(keyLabel) - 1);
+      final isCtrlPressed = HardwareKeyboard.instance.logicalKeysPressed.any(
+        (pressedKey) =>
+            pressedKey == LogicalKeyboardKey.controlLeft ||
+            pressedKey == LogicalKeyboardKey.controlRight,
+      );
+
+      if (isCtrlPressed) {
+        final shaderHotkeys = <LogicalKeyboardKey, int>{
+          LogicalKeyboardKey.digit1: 0,
+          LogicalKeyboardKey.digit2: 1,
+          LogicalKeyboardKey.digit3: 2,
+          LogicalKeyboardKey.digit4: 3,
+          LogicalKeyboardKey.digit5: 4,
+          LogicalKeyboardKey.digit6: 5,
+          LogicalKeyboardKey.digit0: -1,
+        };
+
+        final shaderIndex = shaderHotkeys[key];
+        if (shaderIndex != null) {
+          setShaders(shaderIndex);
+          return;
+        }
       }
     }
   }
