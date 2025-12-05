@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:anymex/utils/logger.dart';
 import 'package:anymex/controllers/service_handler/service_handler.dart';
 import 'package:anymex/controllers/source/source_controller.dart';
@@ -5,6 +7,13 @@ import 'package:anymex/models/Media/media.dart';
 import 'package:dartotsu_extension_bridge/dartotsu_extension_bridge.dart';
 import 'package:fuzzywuzzy/fuzzywuzzy.dart';
 import 'package:get/get.dart';
+
+const Duration _sourceSearchTimeout = Duration(seconds: 6);
+
+class _SourceSearchTimeout implements Exception {
+  const _SourceSearchTimeout(this.source);
+  final Source source;
+}
 
 String _normalizeLight(String title) {
   return title.trim().toLowerCase();
@@ -69,123 +78,165 @@ Future<Media?> mapMedia(
   String englishTitle = animeId[0].split("*").first;
   String romajiTitle = animeId[1] == '??' ? englishTitle : animeId[1];
 
-  final activeSource = isManga
-      ? sourceController.activeMangaSource.value
-      : sourceController.activeSource.value;
+  final attemptedSourceIds = <String>{};
+  List<DMedia> lastFallbackResults = [];
+  Source? lastSourceUsed;
 
-  if (activeSource == null) {
-    Logger.i("No active source found!");
+  while (true) {
+    final activeSource = isManga
+        ? sourceController.activeMangaSource.value
+        : sourceController.activeSource.value;
+
+    if (activeSource == null) {
+      Logger.i("No active source found!");
+      return null;
+    }
+
+    final sourceKey =
+        activeSource.id?.toString() ?? activeSource.hashCode.toString();
+    if (!attemptedSourceIds.add(sourceKey)) {
+      searchedTitle.value = 'No Match Found';
+      break;
+    }
+
+    lastSourceUsed = activeSource;
+    double bestScore = 0;
+    dynamic bestMatch;
+    List<DMedia> fallbackResults = [];
+
+    Future<void> search(
+        String query, String sourceTitle, bool isHeavyNormalized) async {
+      searchedTitle.value = "Fetching results...";
+      List<DMedia> results;
+      try {
+        final response = await activeSource.methods
+            .search(query, 1, [])
+            .timeout(_sourceSearchTimeout);
+        results = response.list;
+      } on TimeoutException {
+        throw _SourceSearchTimeout(activeSource);
+      }
+
+      if (results.isEmpty) return;
+
+      fallbackResults = results;
+      final sourceSeason = _extractSeasonNumber(sourceTitle);
+
+      for (final result in results) {
+        final resultTitle = result.title ?? '';
+        final normalizedResultTitle = isHeavyNormalized
+            ? _normalizeHeavy(resultTitle.trim())
+            : _normalizeLight(resultTitle.trim());
+
+        searchedTitle.value = "Searching: $resultTitle";
+
+        if (savedTitle != null &&
+            _normalizeLight(resultTitle) == _normalizeLight(savedTitle)) {
+          bestScore = 1.0;
+          bestMatch = result;
+          print("Exact match with savedTitle: $resultTitle");
+          return;
+        }
+
+        final resultSeason = _extractSeasonNumber(resultTitle);
+
+        final score = _calculateMatchScore(
+          isHeavyNormalized
+              ? _normalizeHeavy(sourceTitle)
+              : _normalizeLight(sourceTitle),
+          normalizedResultTitle,
+          sourceSeason,
+          resultSeason,
+        );
+
+        print("Score: ${score.toStringAsFixed(3)} for '$resultTitle' "
+            "(Heavy normalized: $isHeavyNormalized)");
+
+        if (score >= 0.95) {
+          bestScore = score;
+          bestMatch = result;
+          print("Perfect match: $resultTitle");
+          return;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = result;
+        }
+      }
+    }
+
+    try {
+      if (savedTitle != null && savedTitle.isNotEmpty) {
+        await search(savedTitle, savedTitle, false);
+        if (bestScore >= 1.0 && bestMatch != null) {
+          searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
+          return Media.froDMedia(bestMatch, type);
+        }
+      }
+
+      await search(englishTitle, englishTitle, false);
+
+      if (bestScore < 0.95) {
+        await search(romajiTitle, romajiTitle, false);
+      }
+
+      if (bestScore > 0.9 && bestMatch != null) {
+        searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
+        print("Good match found: score ${bestScore.toStringAsFixed(3)}");
+        return Media.froDMedia(bestMatch, type);
+      }
+
+      print("No good match found. Trying with heavy normalization...");
+      bestScore = 0;
+      bestMatch = null;
+
+      if (savedTitle != null && savedTitle.isNotEmpty) {
+        await search(_normalizeHeavy(savedTitle), savedTitle, true);
+        if (bestScore >= 1.0 && bestMatch != null) {
+          searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
+          return Media.froDMedia(bestMatch, type);
+        }
+      }
+
+      await search(_normalizeHeavy(englishTitle), englishTitle, true);
+
+      if (bestScore < 0.95) {
+        await search(_normalizeHeavy(romajiTitle), romajiTitle, true);
+      }
+
+      if (bestScore >= 0.7 && bestMatch != null) {
+        searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
+        print(
+            "Final match with heavy normalization: score ${bestScore.toStringAsFixed(3)}");
+        return Media.froDMedia(bestMatch, type);
+      }
+
+      print("No good match. Best: ${bestScore.toStringAsFixed(3)}");
+      lastFallbackResults = fallbackResults;
+      break;
+    } on _SourceSearchTimeout catch (timeout) {
+      final nextSource =
+          sourceController.cycleToNextSource(type, recordUsage: false);
+      if (nextSource == null) {
+        searchedTitle.value =
+            'Source timeout (${timeout.source.name ?? 'Unknown'}).';
+        return null;
+      }
+      searchedTitle.value =
+          'Source timeout (${timeout.source.name ?? 'Unknown'}). '
+          'Trying ${nextSource.name ?? 'next source'}…';
+      continue;
+    }
+  }
+
+  if (lastSourceUsed == null) {
     return null;
   }
 
-  double bestScore = 0;
-  dynamic bestMatch;
-  List<DMedia> fallbackResults = [];
-
-  Future<void> search(
-      String query, String sourceTitle, bool isHeavyNormalized) async {
-    searchedTitle.value = "Fetching results...";
-    final results = (await activeSource.methods.search(query, 1, [])).list;
-    if (results.isEmpty) return;
-
-    final sourceSeason = _extractSeasonNumber(sourceTitle);
-
-    for (final result in results) {
-      final resultTitle = result.title ?? '';
-      final normalizedResultTitle = isHeavyNormalized
-          ? _normalizeHeavy(resultTitle.trim())
-          : _normalizeLight(resultTitle.trim());
-
-      searchedTitle.value = "Searching: $resultTitle";
-
-      if (savedTitle != null &&
-          _normalizeLight(resultTitle) == _normalizeLight(savedTitle)) {
-        bestScore = 1.0;
-        bestMatch = result;
-        fallbackResults = results;
-        print("Exact match with savedTitle: $resultTitle");
-        return;
-      }
-
-      final resultSeason = _extractSeasonNumber(resultTitle);
-
-      final score = _calculateMatchScore(
-        isHeavyNormalized
-            ? _normalizeHeavy(sourceTitle)
-            : _normalizeLight(sourceTitle),
-        normalizedResultTitle,
-        sourceSeason,
-        resultSeason,
-      );
-
-      print("Score: ${score.toStringAsFixed(3)} for '$resultTitle' "
-          "(Heavy normalized: $isHeavyNormalized)");
-
-      if (score >= 0.95) {
-        bestScore = score;
-        bestMatch = result;
-        fallbackResults = results;
-        print("Perfect match: $resultTitle");
-        return;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = result;
-        fallbackResults = results;
-      }
-    }
-  }
-
-  if (savedTitle != null && savedTitle.isNotEmpty) {
-    await search(savedTitle, savedTitle, false);
-    if (bestScore >= 1.0 && bestMatch != null) {
-      searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
-      return Media.froDMedia(bestMatch, type);
-    }
-  }
-
-  await search(englishTitle, englishTitle, false);
-
-  if (bestScore < 0.95) {
-    await search(romajiTitle, romajiTitle, false);
-  }
-
-  if (bestScore > 0.9 && bestMatch != null) {
-    searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
-    print("Good match found: score ${bestScore.toStringAsFixed(3)}");
-    return Media.froDMedia(bestMatch, type);
-  }
-
-  print("No good match found. Trying with heavy normalization...");
-  bestScore = 0;
-  bestMatch = null;
-
-  if (savedTitle != null && savedTitle.isNotEmpty) {
-    await search(_normalizeHeavy(savedTitle), savedTitle, true);
-    if (bestScore >= 1.0 && bestMatch != null) {
-      searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
-      return Media.froDMedia(bestMatch, type);
-    }
-  }
-
-  await search(_normalizeHeavy(englishTitle), englishTitle, true);
-
-  if (bestScore < 0.95) {
-    await search(_normalizeHeavy(romajiTitle), romajiTitle, true);
-  }
-
-  if (bestScore >= 0.7 && bestMatch != null) {
-    searchedTitle.value = (bestMatch.title ?? '').toUpperCase();
-    print(
-        "Final match with heavy normalization: score ${bestScore.toStringAsFixed(3)}");
-    return Media.froDMedia(bestMatch, type);
-  }
-
-  print("No good match. Best: ${bestScore.toStringAsFixed(3)}");
-    searchedTitle.value = fallbackResults.isNotEmpty
-      ? 'No Match Found (${activeSource.name ?? 'Source'})'
+  searchedTitle.value = lastFallbackResults.isNotEmpty
+      ? 'No Match Found (${lastSourceUsed.name ?? 'Source'})'
       : 'No Match Found';
 
-    return null;
+  return null;
 }

@@ -303,6 +303,19 @@ class DownloadController extends GetxController {
         _downloadKey(type: ItemType.manga, mediaId: media.id, number: chapterNumber);
     _clearCancellationState(trackingKey);
     _addActiveDownload(trackingKey);
+    _registerContext(
+      trackingKey,
+      DownloadProgressContext(
+        type: ItemType.manga,
+        mediaId: media.id,
+        mediaTitle: media.title?.isNotEmpty == true
+            ? media.title
+            : media.romajiTitle,
+        chapterNumber: chapterNumber.toDouble(),
+        chapterTitle: chapter.title,
+      ),
+    );
+    _updateProgress(trackingKey, 0.0);
     try {
       _throwIfCancelled(trackingKey);
       final link = chapter.link;
@@ -401,6 +414,7 @@ class DownloadController extends GetxController {
       Logger.i(stackTrace.toString());
     } finally {
       _clearProgress(trackingKey);
+      _removeContext(trackingKey);
       _removeActiveDownload(trackingKey);
       _clearCancellationState(trackingKey);
     }

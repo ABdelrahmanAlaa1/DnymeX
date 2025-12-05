@@ -556,7 +556,9 @@ class PlayerBottomSheets {
     final embeddedTracks = controller.embeddedSubs.value;
     final externalTracks = controller.externalSubs.value;
 
-    final filteredEmbedded = List<SubtitleTrack>.from(embeddedTracks);
+    final filteredEmbedded = embeddedTracks
+      .where(_shouldDisplayEmbeddedSubtitle)
+      .toList();
 
     const searchIndex = 0;
     const importIndex = 1;
@@ -782,19 +784,9 @@ class PlayerBottomSheets {
 
   static String _formatEmbeddedSubtitleLabel(SubtitleTrack track,
       {int? index}) {
-    String? _clean(String? value) {
-      if (value == null) return null;
-      final text = value.trim();
-      if (text.isEmpty) return null;
-      final lowered = text.toLowerCase();
-      if (lowered == 'false' || lowered == 'true' || lowered == 'null') {
-        return null;
-      }
-      return text;
-    }
-
-    final language = _clean(track.language?.toUpperCase());
-    final title = _clean(track.title);
+    final language =
+        _cleanSubtitleMetadata(track.language)?.toUpperCase();
+    final title = _cleanSubtitleMetadata(track.title);
     final labelParts = <String>[];
     if (language != null) labelParts.add(language);
     if (title != null) labelParts.add(title);
@@ -803,7 +795,7 @@ class PlayerBottomSheets {
       return labelParts.join(' · ');
     }
 
-    final uriLabel = _clean(track.uri?.toString());
+    final uriLabel = _cleanSubtitleMetadata(track.uri?.toString());
     if (uriLabel != null && uriLabel.isNotEmpty) {
       return uriLabel;
     }
@@ -812,6 +804,30 @@ class PlayerBottomSheets {
       return 'Embedded track ${index + 1}';
     }
     return 'Embedded track';
+  }
+
+  static bool _shouldDisplayEmbeddedSubtitle(SubtitleTrack track) {
+    if (_cleanSubtitleMetadata(track.language) != null) {
+      return true;
+    }
+    if (_cleanSubtitleMetadata(track.title) != null) {
+      return true;
+    }
+    if (_cleanSubtitleMetadata(track.uri?.toString()) != null) {
+      return true;
+    }
+    return false;
+  }
+
+  static String? _cleanSubtitleMetadata(String? value) {
+    if (value == null) return null;
+    final text = value.trim();
+    if (text.isEmpty) return null;
+    final lowered = text.toLowerCase();
+    if (lowered == 'false' || lowered == 'true' || lowered == 'null') {
+      return null;
+    }
+    return text;
   }
 
   static String _describeExternalSubtitle(Track track) {

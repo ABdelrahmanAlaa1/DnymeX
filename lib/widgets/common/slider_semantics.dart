@@ -46,7 +46,7 @@ class CustomSlider extends StatefulWidget {
     this.inactiveColor,
     this.disableMinMax = false,
     this.resetValue,
-    this.resetHoldDuration = const Duration(milliseconds: 1800),
+    this.resetHoldDuration = const Duration(milliseconds: 1200),
     this.enableLongPressReset = true,
   });
 
@@ -72,11 +72,6 @@ class CustomSliderState extends State<CustomSlider> {
     if (widget.resetValue != null &&
         widget.resetValue != oldWidget.resetValue) {
       _baselineValue = widget.resetValue!;
-    } else if (widget.resetValue == null &&
-        !_isDragging &&
-        oldWidget.value == _baselineValue &&
-        widget.value != oldWidget.value) {
-      _baselineValue = widget.value;
     }
   }
 
@@ -119,7 +114,6 @@ class CustomSliderState extends State<CustomSlider> {
     final resolvedValue = widget.disableMinMax
         ? target
         : _clampValue(target, widget.min ?? 0, widget.max ?? 1);
-    if ((widget.value - resolvedValue).abs() < 0.0001) return;
     widget.onChanged(resolvedValue);
   }
 
