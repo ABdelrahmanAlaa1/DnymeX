@@ -130,6 +130,22 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
   late bool isLoggedIn;
   final leftOriented = true.obs;
   final isMobile = Platform.isAndroid || Platform.isIOS;
+  static const Map<LogicalKeyboardKey, int> _shaderHotkeyMap = {
+    LogicalKeyboardKey.digit1: 0,
+    LogicalKeyboardKey.digit2: 1,
+    LogicalKeyboardKey.digit3: 2,
+    LogicalKeyboardKey.digit4: 3,
+    LogicalKeyboardKey.digit5: 4,
+    LogicalKeyboardKey.digit6: 5,
+    LogicalKeyboardKey.digit0: -1,
+    LogicalKeyboardKey.numpad1: 0,
+    LogicalKeyboardKey.numpad2: 1,
+    LogicalKeyboardKey.numpad3: 2,
+    LogicalKeyboardKey.numpad4: 3,
+    LogicalKeyboardKey.numpad5: 4,
+    LogicalKeyboardKey.numpad6: 5,
+    LogicalKeyboardKey.numpad0: -1,
+  };
 
   // Video Player Visual Profile
   final currentVisualProfile = 'natural'.obs;
@@ -742,6 +758,61 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
     }
   }
 
+  int? _shaderIndexForLogicalKey(LogicalKeyboardKey key) {
+    return _shaderHotkeyMap[key];
+  }
+
+  int? _shaderIndexFromLabel(String? label) {
+    if (label == null) return null;
+    final normalized = label.trim();
+    if (normalized.isEmpty) return null;
+
+    final parsed = int.tryParse(normalized);
+    if (parsed == null) return null;
+
+    if (parsed == 0) return -1;
+    if (parsed >= 1 && parsed <= 6) {
+      return parsed - 1;
+    }
+    return null;
+  }
+
+  int? _shaderIndexFromEvent(KeyEvent event) {
+    final logicalMatch = _shaderIndexForLogicalKey(event.logicalKey);
+    if (logicalMatch != null) {
+      return logicalMatch;
+    }
+
+    final labelMatch = _shaderIndexFromLabel(event.logicalKey.keyLabel);
+    if (labelMatch != null) {
+      return labelMatch;
+    }
+
+    return _shaderIndexFromLabel(event.character);
+  }
+
+  bool _containsControlKey(Iterable<LogicalKeyboardKey> keys) {
+    return keys.any((key) =>
+        key == LogicalKeyboardKey.controlLeft ||
+        key == LogicalKeyboardKey.controlRight ||
+        key == LogicalKeyboardKey.control);
+  }
+
+  bool _isControlModifierActive(KeyEvent event) {
+    if (_containsControlKey(HardwareKeyboard.instance.logicalKeysPressed)) {
+      return true;
+    }
+
+    if (_containsControlKey(RawKeyboard.instance.keysPressed)) {
+      return true;
+    }
+
+    final logicalKey = event.logicalKey;
+    return logicalKey == LogicalKeyboardKey.controlLeft ||
+        logicalKey == LogicalKeyboardKey.controlRight ||
+        logicalKey == LogicalKeyboardKey.control;
+  }
+
   Future<void> handlePlayerKeyEvent(
     KeyEvent e,
   ) async {
@@ -761,31 +832,22 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
       _megaSkip(true);
     }
 
-    if (settings.preferences.get('shaders_enabled', defaultValue: false)) {
-      final isCtrlPressed = HardwareKeyboard.instance.logicalKeysPressed.any(
-        (pressedKey) =>
-            pressedKey == LogicalKeyboardKey.controlLeft ||
-            pressedKey == LogicalKeyboardKey.controlRight,
-      );
-
-      if (isCtrlPressed) {
-        final shaderHotkeys = <LogicalKeyboardKey, int>{
-          LogicalKeyboardKey.digit1: 0,
-          LogicalKeyboardKey.digit2: 1,
-          LogicalKeyboardKey.digit3: 2,
-          LogicalKeyboardKey.digit4: 3,
-          LogicalKeyboardKey.digit5: 4,
-          LogicalKeyboardKey.digit6: 5,
-          LogicalKeyboardKey.digit0: -1,
-        };
-
-        final shaderIndex = shaderHotkeys[key];
-        if (shaderIndex != null) {
-          setShaders(shaderIndex);
-          return;
-        }
-      }
+    if (!settings.preferences.get('shaders_enabled', defaultValue: false)) {
+      return;
     }
+
+    if (!_isControlModifierActive(e)) {
+      return;
+    }
+
+    final shaderIndex = _shaderIndexFromEvent(e);
+    if (shaderIndex == null) {
+      Logger.i(
+          'Ctrl combination pressed but no shader mapping. logicalKey=${key.debugName ?? key.keyLabel}, keyLabel=${key.keyLabel}, character=${e.character}');
+      return;
+    }
+
+    setShaders(shaderIndex);
   }
 
   @override
