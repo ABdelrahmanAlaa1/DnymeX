@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:anymex/controllers/download/download_controller.dart';
 import 'package:anymex/controllers/discord/discord_rpc.dart';
 import 'package:anymex/controllers/offline/offline_storage_controller.dart';
@@ -20,14 +21,18 @@ import 'package:anymex/utils/logger.dart';
 import 'package:anymex/utils/string_extensions.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_titlebar.dart';
 import 'package:anymex/widgets/non_widgets/snackbar.dart';
+import 'package:archive/archive.dart';
 import 'package:dartotsu_extension_bridge/ExtensionManager.dart';
 import 'package:dartotsu_extension_bridge/Models/DEpisode.dart' as d;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:rxdart/rxdart.dart' show ThrottleExtensions;
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -165,6 +170,14 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
   final Rx<List<model.Track>> externalSubs = Rx([]);
   final List<model.Track> _userSubtitleCache = [];
   List<model.Track> _fetchedSubtitleCache = [];
+  static const List<String> _supportedSubtitleExtensions = [
+    '.srt',
+    '.ass',
+    '.ssa',
+    '.vtt',
+    '.sub',
+    '.sbv',
+  ];
 
   final Rx<bool> isSubtitlePaneOpened = false.obs;
   final Rx<bool> isEpisodePaneOpened = false.obs;
@@ -683,6 +696,138 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       (selectedExternalSub.value.file?.isNotEmpty ?? false) ||
       selectedSubsTrack.value != null;
 
+  Future<String?> _cacheOnlineSubtitle(OnlineSubtitle sub) async {
+    final uri = Uri.tryParse(sub.url);
+    if (uri == null) {
+      snackBar('Invalid subtitle link.');
+      return null;
+    }
+
+    http.Response response;
+    try {
+      response = await http.get(uri);
+    } catch (_) {
+      snackBar('Failed to download subtitle.');
+      return null;
+    }
+
+    if (response.statusCode != 200) {
+      snackBar('Subtitle download failed (${response.statusCode}).');
+      return null;
+    }
+
+    List<int> data = response.bodyBytes;
+    final contentType = (response.headers['content-type'] ?? '').toLowerCase();
+    final pathLower = uri.path.toLowerCase();
+    var extension = _resolveSubtitleExtension(
+      declaredFormat: sub.format,
+      fileName: uri.pathSegments.isNotEmpty ? uri.pathSegments.last : null,
+    );
+
+    final isZip = pathLower.endsWith('.zip') || contentType.contains('zip');
+    final isGzip = pathLower.endsWith('.gz') || contentType.contains('gzip');
+
+    if (isZip) {
+      try {
+        final archive = ZipDecoder().decodeBytes(data);
+        final file = archive.files.firstWhereOrNull((entry) =>
+            entry.isFile &&
+            _supportedSubtitleExtensions
+                .any((ext) => entry.name.toLowerCase().endsWith(ext)));
+
+        if (file == null) {
+          snackBar('Archive is missing a supported subtitle file.');
+          return null;
+        }
+
+        data = file.content as List<int>;
+        extension = _resolveSubtitleExtension(
+          declaredFormat: extension,
+          fileName: file.name,
+        );
+      } catch (_) {
+        snackBar('Unable to unzip subtitle file.');
+        return null;
+      }
+    } else if (isGzip) {
+      try {
+        data = GZipDecoder().decodeBytes(data);
+      } catch (_) {
+        snackBar('Unable to extract subtitle archive.');
+        return null;
+      }
+    }
+
+    final dir = await _subtitleCacheDirectory();
+    final sanitizedLabel = _sanitizeFileName(
+      sub.label.isNotEmpty
+          ? sub.label
+          : (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'subtitle'),
+    );
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_$sanitizedLabel.$extension';
+    final file = File(p.join(dir.path, fileName));
+    await file.writeAsBytes(data, flush: true);
+
+    _pruneSubtitleCache(dir);
+    return Uri.file(file.path).toString();
+  }
+
+  Future<Directory> _subtitleCacheDirectory() async {
+    final base = await getTemporaryDirectory();
+    final dir = Directory(p.join(base.path, 'anymex', 'online_subtitles'));
+    if (!dir.existsSync()) {
+      dir.createSync(recursive: true);
+    }
+    return dir;
+  }
+
+  String _resolveSubtitleExtension({String? declaredFormat, String? fileName}) {
+    final candidates = <String?>[
+      fileName?.toLowerCase(),
+      declaredFormat?.toLowerCase(),
+    ];
+
+    for (final candidate in candidates) {
+      if (candidate == null || candidate.isEmpty) continue;
+
+      for (final ext in _supportedSubtitleExtensions) {
+        if (candidate.endsWith(ext)) {
+          return ext.replaceFirst('.', '');
+        }
+      }
+
+      if (candidate.contains('subrip')) return 'srt';
+      if (candidate.contains('webvtt')) return 'vtt';
+      if (candidate.contains('ass')) return 'ass';
+      if (candidate.contains('ssa')) return 'ssa';
+    }
+
+    return 'srt';
+  }
+
+  String _sanitizeFileName(String value) {
+    final sanitized = value
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+        .replaceAll(RegExp(r'\s+'), '_')
+        .trim();
+    return sanitized.isEmpty ? 'subtitle' : sanitized;
+  }
+
+  void _pruneSubtitleCache(Directory dir, {int maxFiles = 30}) {
+    final files = dir
+        .listSync()
+        .whereType<File>()
+        .toList()
+      ..sort((a, b) =>
+          a.statSync().modified.compareTo(b.statSync().modified));
+
+    if (files.length <= maxFiles) return;
+    for (var i = 0; i < files.length - maxFiles; i++) {
+      files[i].deleteSync();
+    }
+  }
+
   int _subtitleComparator(model.Track a, model.Track b) {
     if (a.label == null || b.label == null) return -1;
     if (a.label == "English" && b.label != "English") return -1;
@@ -1011,13 +1156,19 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  void addOnlineSub(OnlineSubtitle sub) {
+  Future<bool> addOnlineSub(OnlineSubtitle sub) async {
+    final cachedPath = await _cacheOnlineSubtitle(sub);
+    if (cachedPath == null) {
+      return false;
+    }
+
     addCustomSubtitleTrack(
       model.Track(
         label: '${sub.label} (Online)',
-        file: sub.url,
+        file: cachedPath,
       ),
     );
+    return true;
   }
 
   void navigator(bool forward) {

@@ -425,6 +425,14 @@ class _ChapterListBuilderState extends State<ChapterListBuilder> {
         if (widget.showingDownloaded && downloadEntry != null) {
           _openDownloadedChapter(downloadEntry);
         } else {
+          final currentSource =
+              Get.find<SourceController>().activeMangaSource.value;
+          if (currentSource != null) {
+            Get.find<SourceController>().recordSourceUsage(
+              type: ItemType.manga,
+              source: currentSource,
+            );
+          }
           _chapterService.navigateToReading(
               widget.anilistData, filteredFullChapters, chapter, context);
         }
@@ -682,20 +690,30 @@ class ChapterListItem extends StatelessWidget {
       size: 18,
     );
 
-    final Widget visualChild = (isIconOnly || !showLabel)
-        ? Center(child: iconWidget)
-        : Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              iconWidget,
-              const SizedBox(width: 6),
-              AnymexText(
+    final Widget visualChild;
+    if (isIconOnly || !showLabel) {
+      visualChild = Center(child: iconWidget);
+    } else {
+      visualChild = Align(
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            iconWidget,
+            const SizedBox(width: 6),
+            Flexible(
+              child: AnymexText(
                 text: label,
                 variant: TextVariant.semiBold,
                 color: Theme.of(context).colorScheme.onPrimary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-          );
+            ),
+          ],
+        ),
+      );
+    }
 
     return Semantics(
       button: true,

@@ -964,6 +964,13 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
             return InkWell(
               onTap: () async {
                 Get.back();
+                final currentSource = sourceController.activeSource.value;
+                if (currentSource != null) {
+                  sourceController.recordSourceUsage(
+                    type: ItemType.anime,
+                    source: currentSource,
+                  );
+                }
                 if (General.shouldAskForTrack.get(true) == false) {
                   navigate(() => settingsController.preferences
                           .get('useOldPlayer', defaultValue: false)

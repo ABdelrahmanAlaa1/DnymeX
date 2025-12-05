@@ -155,22 +155,18 @@ class _EpisodeSectionState extends State<EpisodeSection> {
     widget.episodeList?.value = [];
 
     try {
-      final extensionService = Get.find<ServiceHandler>().extensionService;
-    final selectedSource = extensionService.installedExtensions
-      .firstWhereOrNull((source) =>
-        source.id?.toString() == value || source.name == value);
+      final selectedSource = sourceController.installedExtensions
+          .firstWhereOrNull((source) =>
+              source.id?.toString() == value || source.name == value);
 
       final media = _currentMedia;
       if (media != null && selectedSource != null) {
-        extensionService.rememberSourceSelectionForMedia(
+        sourceController.rememberSourceSelectionForMedia(
           type: ItemType.anime,
           media: media,
           source: selectedSource,
         );
-        sourceController.recordSourceUsage(
-          type: ItemType.anime,
-          source: selectedSource,
-        );
+        sourceController.setActiveSource(selectedSource);
       }
 
       _requestCounter.value++;

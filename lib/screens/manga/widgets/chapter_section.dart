@@ -420,8 +420,6 @@ class _ChapterSectionState extends State<ChapterSection> {
               source: selectedSource,
             );
             widget.sourceController.setActiveSource(selectedSource);
-            widget.sourceController
-                .recordSourceUsage(type: ItemType.manga, source: selectedSource);
           }
           _scheduleFallback();
           await widget.mapToAnilist();

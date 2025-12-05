@@ -45,6 +45,8 @@ class _SubtitleSearchBottomSheetState extends State<SubtitleSearchBottomSheet> {
 
   final Rx<SubtitleSearchView> _currentView = SubtitleSearchView.search.obs;
 
+  String? _downloadingSubtitleId;
+
   final List<String> _filterOptions = [
     'All',
     'English',
@@ -786,8 +788,28 @@ class _SubtitleSearchBottomSheetState extends State<SubtitleSearchBottomSheet> {
     );
   }
 
+  Future<void> _handleSubtitleSelection(OnlineSubtitle subtitle) async {
+    if (_downloadingSubtitleId != null) return;
+
+    setState(() {
+      _downloadingSubtitleId = subtitle.id;
+    });
+
+    final success = await widget.controller.addOnlineSub(subtitle);
+    if (success) {
+      _subtitles.remove(subtitle);
+    }
+
+    if (mounted) {
+      setState(() {
+        _downloadingSubtitleId = null;
+      });
+    }
+  }
+
   Widget _buildSubtitleCard(
       OnlineSubtitle subtitle, ThemeData theme, ColorScheme colorScheme) {
+    final isDownloading = _downloadingSubtitleId == subtitle.id;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -796,13 +818,9 @@ class _SubtitleSearchBottomSheetState extends State<SubtitleSearchBottomSheet> {
         border: Border.all(color: colorScheme.outline.withOpacity(0.2)),
       ),
       child: InkWell(
-        onTap: _isLoading
+        onTap: _isLoading || (_downloadingSubtitleId != null && !isDownloading)
             ? null
-            : () {
-                widget.controller.addOnlineSub(subtitle);
-                _subtitles.remove(subtitle);
-                setState(() {});
-              },
+            : () => _handleSubtitleSelection(subtitle),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -844,13 +862,28 @@ class _SubtitleSearchBottomSheetState extends State<SubtitleSearchBottomSheet> {
                       color: colorScheme.primaryContainer,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      subtitle.format,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onPrimaryContainer,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          subtitle.format,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onPrimaryContainer,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (isDownloading) ...[
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: ExpressiveLoadingIndicator(
+                              color: colorScheme.onPrimaryContainer,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ],
