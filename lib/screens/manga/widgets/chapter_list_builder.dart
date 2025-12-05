@@ -691,30 +691,54 @@ class ChapterListItem extends StatelessWidget {
       size: 18,
     );
 
-    final Widget visualChild;
     if (isIconOnly || !showLabel) {
-      visualChild = Center(child: iconWidget);
-    } else {
-      visualChild = Align(
-        alignment: Alignment.centerLeft,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            iconWidget,
-            const SizedBox(width: 6),
-            Flexible(
-              child: AnymexText(
-                text: label,
-                variant: TextVariant.semiBold,
-                color: Theme.of(context).colorScheme.onPrimary,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+      return Semantics(
+        button: true,
+        label: label,
+        child: Container(
+          decoration: BoxDecoration(boxShadow: [glowingShadow(context)]),
+          child: Material(
+            color: Colors.transparent,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: InkWell(
+              onTap: onPressed,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: iconWidget,
               ),
             ),
-          ],
+          ),
         ),
       );
     }
+
+    final visualChild = Align(
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          iconWidget,
+          const SizedBox(width: 6),
+          Flexible(
+            child: AnymexText(
+              text: label,
+              variant: TextVariant.semiBold,
+              color: Theme.of(context).colorScheme.onPrimary,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
 
     return Semantics(
       button: true,

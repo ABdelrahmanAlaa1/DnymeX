@@ -547,11 +547,6 @@ class SourceController extends GetxController implements BaseService {
     if (sources.length <= 1) return null;
 
     final favorites = getTopSources(type);
-    final favoriteIds = favorites
-        .map((source) => source.id?.toString())
-        .whereType<String>()
-        .toSet();
-
     final current = getActiveSourceForType(type);
     final currentId = current?.id?.toString();
     final currentIndex = currentId == null
@@ -560,21 +555,25 @@ class SourceController extends GetxController implements BaseService {
 
     int nextIndex;
     if (currentIndex == -1) {
-      nextIndex = 0;
-    } else if (!favoriteIds.contains(currentId ?? '') &&
-        favorites.isNotEmpty) {
-      nextIndex = 0;
-      if (sources[nextIndex].id?.toString() == currentId) {
-        nextIndex = (nextIndex + 1) % sources.length;
+      final favoriteStart = favorites.firstWhereOrNull((favorite) =>
+          sources.any((source) =>
+              source.id?.toString() == favorite.id?.toString()));
+      nextIndex = favoriteStart != null
+          ? sources.indexWhere((source) =>
+              source.id?.toString() == favoriteStart.id?.toString())
+          : 0;
+      if (nextIndex < 0) {
+        nextIndex = 0;
       }
     } else {
       nextIndex = (currentIndex + 1) % sources.length;
     }
 
-    final nextSource = sources[nextIndex];
-    if (nextSource.id?.toString() == currentId) {
+    if (nextIndex == currentIndex) {
       return null;
     }
+
+    final nextSource = sources[nextIndex];
 
     _setActiveSourceForType(type, nextSource);
     if (recordUsage) {

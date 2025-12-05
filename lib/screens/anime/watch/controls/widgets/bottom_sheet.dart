@@ -292,6 +292,22 @@ class _BottomSheetListItemState extends State<_BottomSheetListItem>
 
   @override
   Widget build(BuildContext context) {
+    final mutedBaseColor =
+        context.theme.colorScheme.surfaceVariant.withOpacity(0.25);
+    final mutedHoverColor =
+        context.theme.colorScheme.surfaceVariant.withOpacity(0.4);
+    final hoverColor = widget.item.useMutedStyle
+        ? mutedHoverColor
+        : context.theme.colorScheme.primary.withOpacity(0.08);
+    final idleColor =
+        widget.item.useMutedStyle ? mutedBaseColor : Colors.transparent;
+    final idleBorderColor = widget.item.useMutedStyle
+        ? context.theme.colorScheme.outline.withOpacity(0.2)
+        : Colors.transparent;
+    final hoverBorderColor = widget.item.useMutedStyle
+        ? context.theme.colorScheme.outline.withOpacity(0.25)
+        : context.theme.colorScheme.primary.withOpacity(0.2);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: MouseRegion(
@@ -313,114 +329,130 @@ class _BottomSheetListItemState extends State<_BottomSheetListItem>
             builder: (context, child) {
               return Transform.scale(
                 scale: _scaleAnimation.value,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: widget.isSelected
-                        ? context.theme.colorScheme.primary.withOpacity(0.12)
-                        : (_isHovered
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: widget.isSelected
                             ? context.theme.colorScheme.primary
-                                .withOpacity(0.08)
-                            : Colors.transparent),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: widget.isSelected
-                          ? context.theme.colorScheme.primary.withOpacity(0.3)
-                          : (_isHovered
+                                .withOpacity(0.12)
+                            : (_isHovered ? hoverColor : idleColor),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: widget.isSelected
                               ? context.theme.colorScheme.primary
-                                  .withOpacity(0.2)
-                              : Colors.transparent),
-                      width: widget.isSelected ? 1.0 : 0.5,
-                    ),
-                    boxShadow: widget.isSelected || _isHovered
-                        ? [
-                            BoxShadow(
-                              color:
-                                  context.theme.colorScheme.primary.withOpacity(
-                                widget.isSelected ? 0.2 : 0.1,
-                              ),
-                              blurRadius: widget.isSelected ? 12 : 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Row(
-                    children: [
-                      if (widget.item.icon != null)
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: widget.isSelected
-                                ? context.theme.colorScheme.primary
-                                    .withOpacity(0.15)
-                                : context.theme.colorScheme.surfaceVariant
-                                    .withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            widget.item.icon,
-                            size: 20,
-                            color: widget.isSelected
-                                ? context.theme.colorScheme.primary
-                                : context.theme.colorScheme.onSurface
-                                    .withOpacity(0.7),
-                          ),
+                                  .withOpacity(0.3)
+                              : (_isHovered ? hoverBorderColor : idleBorderColor),
+                          width: widget.isSelected ? 1.0 : 0.5,
                         ),
-                      if (widget.item.icon != null) const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              widget.item.title,
-                              style:
-                                  context.theme.textTheme.bodyLarge?.copyWith(
-                                fontWeight: widget.isSelected
-                                    ? FontWeight.w600
-                                    : FontWeight.w500,
+                        boxShadow: widget.isSelected || _isHovered
+                            ? [
+                                BoxShadow(
+                                  color: context.theme.colorScheme.primary
+                                      .withOpacity(
+                                          widget.isSelected ? 0.2 : 0.1),
+                                  blurRadius: widget.isSelected ? 12 : 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Row(
+                        children: [
+                          if (widget.item.icon != null)
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
                                 color: widget.isSelected
                                     ? context.theme.colorScheme.primary
-                                    : context.theme.colorScheme.onSurface,
+                                        .withOpacity(0.15)
+                                    : widget.item.useMutedStyle
+                                        ? context.theme.colorScheme.surfaceVariant
+                                            .withOpacity(0.4)
+                                        : context
+                                            .theme.colorScheme.surfaceVariant
+                                            .withOpacity(0.3),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                widget.item.icon,
+                                size: 20,
+                                color: widget.isSelected
+                                    ? context.theme.colorScheme.primary
+                                    : context.theme.colorScheme.onSurface
+                                        .withOpacity(0.7),
                               ),
                             ),
-                            if (widget.item.subtitle != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  widget.item.subtitle!,
-                                  style: context.theme.textTheme.bodySmall
+                          if (widget.item.icon != null)
+                            const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  widget.item.title,
+                                  style: context.theme.textTheme.bodyLarge
                                       ?.copyWith(
-                                    color: context.theme.colorScheme.onSurface
-                                        .withOpacity(0.6),
+                                    fontWeight: widget.isSelected
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: widget.isSelected
+                                        ? context.theme.colorScheme.primary
+                                        : context.theme.colorScheme.onSurface,
                                   ),
                                 ),
+                                if (widget.item.subtitle != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Text(
+                                      widget.item.subtitle!,
+                                      style: context.theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                        color: context
+                                            .theme.colorScheme.onSurface
+                                            .withOpacity(0.6),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (widget.item.trailing != null)
+                            widget.item.trailing!
+                          else if (widget.isSelected)
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: context.theme.colorScheme.primary
+                                    .withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                          ],
+                              child: Icon(
+                                Icons.check,
+                                size: 16,
+                                color: context.theme.colorScheme.primary,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (widget.item.addBottomDivider)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Divider(
+                          height: 1,
+                          thickness: 1,
+                          color: context.theme.colorScheme.outline
+                              .withOpacity(0.15),
                         ),
                       ),
-                      if (widget.item.trailing != null)
-                        widget.item.trailing!
-                      else if (widget.isSelected)
-                        Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: context.theme.colorScheme.primary
-                                .withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            Icons.check,
-                            size: 16,
-                            color: context.theme.colorScheme.primary,
-                          ),
-                        ),
-                    ],
-                  ),
+                  ],
                 ),
               );
             },
@@ -437,6 +469,8 @@ class BottomSheetItem {
   final IconData? icon;
   final Widget? trailing;
   final dynamic value;
+  final bool useMutedStyle;
+  final bool addBottomDivider;
 
   const BottomSheetItem({
     required this.title,
@@ -444,6 +478,8 @@ class BottomSheetItem {
     this.icon,
     this.trailing,
     this.value,
+    this.useMutedStyle = false,
+    this.addBottomDivider = false,
   });
 }
 
@@ -555,11 +591,14 @@ class PlayerBottomSheets {
           title: 'Search Online',
           subtitle: 'Find subtitles online',
           icon: Icons.cloud_download,
+          useMutedStyle: true,
         ),
         const BottomSheetItem(
           title: 'Import Subtitle',
           subtitle: 'Load from your device',
           icon: Icons.upload_file,
+          useMutedStyle: true,
+          addBottomDivider: true,
         ),
         const BottomSheetItem(
           title: 'None',
@@ -764,7 +803,7 @@ class PlayerBottomSheets {
       return labelParts.join(' · ');
     }
 
-    final uriLabel = track.uri?.toString();
+    final uriLabel = _clean(track.uri?.toString());
     if (uriLabel != null && uriLabel.isNotEmpty) {
       return uriLabel;
     }
