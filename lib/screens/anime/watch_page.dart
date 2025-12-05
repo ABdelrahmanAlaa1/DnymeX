@@ -130,7 +130,7 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
   late bool isLoggedIn;
   final leftOriented = true.obs;
   final isMobile = Platform.isAndroid || Platform.isIOS;
-  static const Map<LogicalKeyboardKey, int> _shaderHotkeyMap = {
+  static final Map<LogicalKeyboardKey, int> _shaderHotkeyMap = {
     LogicalKeyboardKey.digit1: 0,
     LogicalKeyboardKey.digit2: 1,
     LogicalKeyboardKey.digit3: 2,
