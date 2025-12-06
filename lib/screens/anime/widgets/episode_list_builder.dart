@@ -21,6 +21,7 @@ import 'package:anymex/utils/function.dart';
 import 'package:anymex/utils/string_extensions.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_button.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_chip.dart';
+import 'package:anymex/widgets/common/glow.dart';
 import 'package:anymex/widgets/common/hold_to_cancel_detector.dart';
 import 'package:anymex/widgets/header.dart';
 import 'package:anymex/widgets/helper/platform_builder.dart';
@@ -500,6 +501,75 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
     return host?.isNotEmpty == true ? host : null;
   }
 
+  Future<bool> _confirmCancelDownload(BuildContext context) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Cancel download?'),
+          content: const Text(
+            'Stopping now will discard the partially downloaded episode. Continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Keep downloading'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Cancel download'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result ?? false;
+  }
+
+  Widget _cancelDownloadButton(BuildContext context,
+      {required Future<void> Function()? onCancel}) {
+    final scheme = Theme.of(context).colorScheme;
+    final isEnabled = onCancel != null;
+
+    final button = Material(
+      color: scheme.error.withOpacity(0.08),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: !isEnabled
+            ? null
+            : () async {
+                final confirmed = await _confirmCancelDownload(context);
+                if (confirmed && onCancel != null) {
+                  await onCancel();
+                }
+              },
+        child: Padding(
+          padding: const EdgeInsets.all(6.0),
+          child: Icon(
+            Icons.close_rounded,
+            size: 16,
+            color: isEnabled
+                ? scheme.error
+                : scheme.error.withOpacity(0.4),
+          ),
+        ),
+      ),
+    );
+
+    return Tooltip(
+      message: isEnabled ? 'Cancel download' : 'Cancel unavailable',
+      child: Opacity(
+        opacity: isEnabled ? 1 : 0.5,
+        child: button,
+      ),
+    );
+  }
+
   Widget _buildDownloadBadge(BuildContext context,
       {required bool isDownloaded,
       required bool isDownloading,
@@ -508,8 +578,8 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
       Future<void> Function()? onCancel}) {
     if (isDownloading) {
       final percent = progress != null ? (progress * 100).clamp(0, 100) : null;
-      return HoldToCancelDetector(
-        tooltip: 'Hold 2s to cancel download',
+      final indicator = HoldToCancelDetector(
+        tooltip: 'Hold 1.2s to cancel',
         onConfirmed: () async {
           if (onCancel != null) {
             await onCancel();
@@ -518,11 +588,12 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
         overlayRadius: BorderRadius.circular(9999),
         progressColor: Theme.of(context).colorScheme.error,
         child: Container(
-          width: 38,
-          height: 38,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
             shape: BoxShape.circle,
+            color: Theme.of(context).colorScheme.surface,
+            boxShadow: [glowingShadow(context)],
           ),
           child: Stack(
             alignment: Alignment.center,
@@ -548,24 +619,40 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
           ),
         ),
       );
+
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _cancelDownloadButton(context, onCancel: onCancel),
+          const SizedBox(width: 8),
+          indicator,
+        ],
+      );
     }
 
+    final scheme = Theme.of(context).colorScheme;
+    final accentColor = isDownloaded ? scheme.secondary : scheme.primary;
     return Tooltip(
       message: isDownloaded ? 'Open download' : 'Download episode',
-      child: Material(
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.85),
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Icon(
-              isDownloaded ? Icons.check_circle : Icons.download_rounded,
-              size: 18,
-              color: isDownloaded
-                  ? Theme.of(context).colorScheme.secondary
-                  : Theme.of(context).colorScheme.primary,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: accentColor.withOpacity(0.12),
+          boxShadow: [glowingShadow(context)],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Icon(
+                isDownloaded ? Icons.check_circle : Icons.download_rounded,
+                size: 18,
+                color: accentColor,
+              ),
             ),
           ),
         ),

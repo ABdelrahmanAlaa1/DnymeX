@@ -757,6 +757,62 @@ class ChapterListItem extends StatelessWidget {
     );
   }
 
+  Future<bool> _confirmCancelDialog(BuildContext context) async {
+    final chapterLabel = chapter.number?.toStringAsFixed(0) ?? '?';
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancel download?'),
+        content: Text(
+            'Stop downloading chapter $chapterLabel? Any progress so far will be discarded.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep downloading'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Cancel download'),
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
+  }
+
+  Widget _inlineCancelButton(BuildContext context,
+      {required Future<void> Function() onConfirmed}) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: 'Cancel download',
+      child: Material(
+        color: scheme.error.withOpacity(0.15),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () async {
+            final confirmed = await _confirmCancelDialog(context);
+            if (confirmed) {
+              await onConfirmed();
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(4.0),
+            child: Icon(
+              Icons.close_rounded,
+              size: 16,
+              color: scheme.error,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _downloadButton(BuildContext context) {
     if (isDownloaded) {
       return _iconBadge(
@@ -770,24 +826,39 @@ class ChapterListItem extends StatelessWidget {
 
     if (isDownloading) {
       final downloadController = Get.find<DownloadController>();
-      return HoldToCancelDetector(
-        tooltip: 'Hold 2s to cancel download',
-        overlayRadius: BorderRadius.circular(12),
-        progressColor: Theme.of(context).colorScheme.error,
-        onConfirmed: () async {
-          await downloadController.cancelChapterDownload(
-            anilistData.id,
-            chapter.number,
-          );
-        },
-        child: SizedBox(
-          width: 36,
-          height: 36,
-          child: CircularProgressIndicator(
-            value: downloadProgress,
-            strokeWidth: 2.5,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+      Future<void> cancelAction() async {
+        await downloadController.cancelChapterDownload(
+          anilistData.id,
+          chapter.number,
+        );
+      }
+
+      return SizedBox(
+        width: 40,
+        height: 40,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            HoldToCancelDetector(
+              tooltip: 'Hold 1.2s to cancel',
+              overlayRadius: BorderRadius.circular(12),
+              progressColor: Theme.of(context).colorScheme.error,
+              onConfirmed: cancelAction,
+              child: SizedBox(
+                width: 36,
+                height: 36,
+                child: CircularProgressIndicator(
+                  value: downloadProgress,
+                  strokeWidth: 2.5,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+            _inlineCancelButton(
+              context,
+              onConfirmed: cancelAction,
+            ),
+          ],
         ),
       );
     }

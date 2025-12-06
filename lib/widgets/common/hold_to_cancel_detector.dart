@@ -7,11 +7,12 @@ class HoldToCancelDetector extends StatefulWidget {
     super.key,
     required this.child,
     required this.onConfirmed,
-    this.duration = const Duration(seconds: 2),
+    this.duration = const Duration(milliseconds: 1200),
     this.tooltip,
     this.overlayRadius,
     this.enabled = true,
     this.progressColor,
+    this.movementTolerance = 25,
   });
 
   final Widget child;
@@ -21,6 +22,7 @@ class HoldToCancelDetector extends StatefulWidget {
   final BorderRadius? overlayRadius;
   final bool enabled;
   final Color? progressColor;
+  final double movementTolerance;
 
   @override
   State<HoldToCancelDetector> createState() => _HoldToCancelDetectorState();
@@ -38,7 +40,7 @@ class _HoldToCancelDetectorState extends State<HoldToCancelDetector> {
     super.dispose();
   }
 
-  void _startHold() {
+  void _startHold(PointerDownEvent event) {
     if (!widget.enabled) return;
     _timer?.cancel();
     _startTime = DateTime.now();
@@ -84,6 +86,29 @@ class _HoldToCancelDetectorState extends State<HoldToCancelDetector> {
     }
   }
 
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (!widget.enabled || !_isHolding) return;
+    if (!_isWithinTolerance(event.position)) {
+      _cancelHold();
+    }
+  }
+
+  bool _isWithinTolerance(Offset globalPosition) {
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.hasSize) {
+      return true;
+    }
+    final localPosition = renderBox.globalToLocal(globalPosition);
+    final tolerance = widget.movementTolerance;
+    final expandedRect = Rect.fromLTWH(
+      -tolerance,
+      -tolerance,
+      renderBox.size.width + (tolerance * 2),
+      renderBox.size.height + (tolerance * 2),
+    );
+    return expandedRect.contains(localPosition);
+  }
+
   @override
   Widget build(BuildContext context) {
     final child = widget.tooltip == null
@@ -98,11 +123,12 @@ class _HoldToCancelDetectorState extends State<HoldToCancelDetector> {
     final indicatorColor =
         widget.progressColor ?? Theme.of(context).colorScheme.error;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: widget.enabled ? (_) => _startHold() : null,
-      onTapUp: (_) => _cancelHold(),
-      onTapCancel: _cancelHold,
+    return Listener(
+      behavior: HitTestBehavior.deferToChild,
+      onPointerDown: widget.enabled ? _startHold : null,
+      onPointerMove: _handlePointerMove,
+      onPointerUp: (_) => _cancelHold(),
+      onPointerCancel: (_) => _cancelHold(),
       child: Stack(
         fit: StackFit.passthrough,
         alignment: Alignment.center,

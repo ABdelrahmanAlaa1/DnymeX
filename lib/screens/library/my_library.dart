@@ -523,6 +523,79 @@ class _ActiveDownloadsCard extends StatelessWidget {
   final Map<String, double> progressValues;
   final Future<void> Function(String key)? onCancel;
 
+  Future<bool> _confirmCancelDownload(
+      BuildContext context, DownloadProgressContext contextData) async {
+    final label = contextData.type == ItemType.anime
+        ? 'Episode ${contextData.episodeNumber ?? '?'}'
+        : 'Chapter ${contextData.chapterNumber?.toStringAsFixed(0) ?? '?'}';
+    final mediaTitle = contextData.mediaTitle ?? 'this title';
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancel download?'),
+        content: Text(
+            'Stop downloading $label from $mediaTitle? Any partial data will be discarded.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep downloading'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Cancel download'),
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
+  }
+
+  Widget _cancelButton(BuildContext context, String entryKey,
+      DownloadProgressContext contextData) {
+    final scheme = Theme.of(context).colorScheme;
+    final isEnabled = onCancel != null;
+
+    final button = Material(
+      color: scheme.error.withOpacity(0.1),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: !isEnabled
+            ? null
+            : () async {
+                final confirmed =
+                    await _confirmCancelDownload(context, contextData);
+                if (confirmed && onCancel != null) {
+                  await onCancel!(entryKey);
+                }
+              },
+        child: Padding(
+          padding: const EdgeInsets.all(6.0),
+          child: Icon(
+            Icons.close_rounded,
+            size: 18,
+            color: isEnabled
+                ? scheme.error
+                : scheme.error.withOpacity(0.4),
+          ),
+        ),
+      ),
+    );
+
+    return Tooltip(
+      message: isEnabled ? 'Cancel download' : 'Cancel unavailable',
+      child: Opacity(
+        opacity: isEnabled ? 1 : 0.5,
+        child: button,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -584,7 +657,7 @@ class _ActiveDownloadsCard extends StatelessWidget {
                       children: [
                         Expanded(
                           child: HoldToCancelDetector(
-                            tooltip: 'Hold 2s to cancel download',
+                            tooltip: 'Hold 1.2s to cancel',
                             overlayRadius: BorderRadius.circular(8),
                             progressColor:
                                 Theme.of(context).colorScheme.error,
@@ -609,6 +682,8 @@ class _ActiveDownloadsCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        _cancelButton(context, entry.key, contextData),
                         const SizedBox(width: 12),
                         Text(
                           percentLabel,
