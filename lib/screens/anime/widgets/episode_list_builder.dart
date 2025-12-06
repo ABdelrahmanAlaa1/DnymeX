@@ -578,6 +578,12 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
       Future<void> Function()? onCancel}) {
     if (isDownloading) {
       final percent = progress != null ? (progress * 100).clamp(0, 100) : null;
+      final theme = Theme.of(context);
+      final scheme = theme.colorScheme;
+      final indicatorBackground = Color.alphaBlend(
+        scheme.primary.withOpacity(0.08),
+        scheme.surfaceVariant,
+      );
       final indicator = HoldToCancelDetector(
         tooltip: 'Hold 1.2s to cancel',
         onConfirmed: () async {
@@ -586,13 +592,13 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
           }
         },
         overlayRadius: BorderRadius.circular(9999),
-        progressColor: Theme.of(context).colorScheme.error,
+        progressColor: scheme.error,
         child: Container(
           width: 42,
           height: 42,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Theme.of(context).colorScheme.surface,
+            color: indicatorBackground,
             boxShadow: [glowingShadow(context)],
           ),
           child: Stack(
@@ -603,7 +609,7 @@ class _EpisodeListBuilderState extends State<EpisodeListBuilder> {
                 height: 34,
                 child: CircularProgressIndicator(
                   strokeWidth: 3,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: scheme.primary,
                   value: progress,
                 ),
               ),

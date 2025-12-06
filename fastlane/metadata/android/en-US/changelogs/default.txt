@@ -5,11 +5,6 @@
 -   opt out for subtitle transition
 
 ### 🔧 Bug Fixes & Improvements
--   use seekduration for double-tap seek
--   fixed same track dialog for both anime and manga
--   fixplayer resize mode
--   fixed ios back gesture override
--   reverse search terms display order in inlinesearchhistory
 -   fixed a grey screen error on home page
 -   fixed volume not being update realtime
 -   fixed an issue where series was showing up as manga
@@ -17,15 +12,11 @@
 -   fixed dropdown barrier
 -   fixed header on platforms other than windows
 
-### 🔧 Refactors
--   improve consistency of ui elements and texts
-
 ### 🎨 Style Changes
 -   option for having transparent image as bg
 -   new page transition
 
 ### 🧹 Chores & Documentation
--   reduced build size
 -   bump version to v3.0.3 patch release
 
  

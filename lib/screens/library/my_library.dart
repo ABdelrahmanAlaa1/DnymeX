@@ -22,6 +22,7 @@ import 'package:anymex/screens/settings/widgets/history_card_gate.dart';
 import 'package:anymex/screens/settings/widgets/history_card_selector.dart';
 import 'package:anymex/utils/extension_utils.dart';
 import 'package:anymex/utils/function.dart';
+import 'package:anymex/widgets/common/glow.dart';
 import 'package:anymex/widgets/common/cards/base_card.dart';
 import 'package:anymex/widgets/common/cards/card_gate.dart';
 import 'package:anymex/widgets/custom_widgets/anymex_bottomsheet.dart';
@@ -246,6 +247,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
                   onDeleteChapter: _deleteChapter,
                   onRefresh: _refresh,
                   onOpenEpisode: _openEpisodeFromGroup,
+                  accentColor: Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(height: 12),
                 _DownloadsSummaryCard<DownloadedChapter>(
@@ -257,6 +259,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
                   onDeleteChapter: _deleteChapter,
                   onRefresh: _refresh,
                   onOpenChapter: _openChapterFromGroup,
+                  accentColor: Theme.of(context).colorScheme.secondary,
                 ),
               ],
             );
@@ -271,6 +274,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
       final contextEntries =
           _downloadController.progressContexts.entries.toList();
       final progressSnapshot = Map<String, double>.from(_downloadController.progress);
+      final scheme = Theme.of(context).colorScheme;
       final episodeEntries = contextEntries
           .where((entry) => entry.value.type == ItemType.anime)
           .toList();
@@ -290,6 +294,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
               title: 'Active episode downloads',
               entries: episodeEntries,
               progressValues: progressSnapshot,
+              accentColor: scheme.primary,
               onCancel: (key) => _downloadController.cancelActiveDownload(key),
             ),
           if (mangaEntries.isNotEmpty) ...[
@@ -298,6 +303,7 @@ class _DownloadsHubSectionState extends State<DownloadsHubSection> {
               title: 'Active manga downloads',
               entries: mangaEntries,
               progressValues: progressSnapshot,
+              accentColor: scheme.secondary,
               onCancel: (key) => _downloadController.cancelActiveDownload(key),
             ),
           ],
@@ -404,6 +410,7 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
     required this.onDeleteChapter,
     this.onOpenChapter,
     this.onOpenEpisode,
+    this.accentColor,
   });
 
   final String title;
@@ -415,6 +422,7 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
   final Future<void> Function(DownloadedChapter) onDeleteChapter;
   final void Function(_ChapterDownloadGroup, DownloadedChapter)? onOpenChapter;
   final void Function(_EpisodeDownloadGroup, DownloadedEpisode)? onOpenEpisode;
+  final Color? accentColor;
 
   String get _summaryLabel {
     final buffer = StringBuffer();
@@ -426,10 +434,54 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final Color accent = accentColor ??
+        (title.toLowerCase().contains('manga')
+            ? scheme.secondary
+            : scheme.primary);
+
+    final tiles = <Widget>[];
+    for (final group in groups) {
+      if (group is _EpisodeDownloadGroup) {
+        tiles.add(_EpisodeGroupTile(
+          group: group,
+          accentColor: accent,
+          onDelete: onDeleteEpisode,
+          onOpen:
+              onOpenEpisode == null ? null : (episode) => onOpenEpisode!(group, episode),
+        ));
+      } else if (group is _ChapterDownloadGroup) {
+        tiles.add(_ChapterGroupTile(
+          group: group,
+          accentColor: accent,
+          onDelete: onDeleteChapter,
+          onOpen: onOpenChapter == null
+              ? null
+              : (chapter) => onOpenChapter!(group, chapter),
+        ));
+      }
+      tiles.add(const SizedBox(height: 10));
+    }
+    if (tiles.isNotEmpty) tiles.removeLast();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: LinearGradient(
+          colors: [
+            Color.alphaBlend(accent.withOpacity(0.18), scheme.surface),
+            Color.alphaBlend(accent.withOpacity(0.05), scheme.surfaceVariant),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: accent.withOpacity(0.2)),
+        boxShadow: [lightGlowingShadow(context)],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(18.0),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -439,23 +491,29 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Color.alphaBlend(
+                            accent.withOpacity(0.22),
+                            scheme.surface,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          title,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 8),
                       Text(
                         _summaryLabel,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -467,42 +525,18 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             if (itemCount == 0)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(
                   'No downloads yet. Start saving episodes or chapters for offline access.',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: Theme.of(context).hintColor),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.hintColor),
                 ),
               )
             else
-              Column(
-                children: groups.map((group) {
-                  if (group is _EpisodeDownloadGroup) {
-                    return _EpisodeGroupTile(
-                      group: group,
-                      onDelete: onDeleteEpisode,
-                      onOpen: onOpenEpisode == null
-                          ? null
-                          : (episode) => onOpenEpisode!(group, episode),
-                    );
-                  }
-                  if (group is _ChapterDownloadGroup) {
-                    return _ChapterGroupTile(
-                      group: group,
-                      onDelete: onDeleteChapter,
-                      onOpen: onOpenChapter == null
-                          ? null
-                          : (chapter) => onOpenChapter!(group, chapter),
-                    );
-                  }
-                  return const SizedBox.shrink();
-                }).toList(),
-              ),
+              Column(children: tiles),
           ],
         ),
       ),
@@ -516,12 +550,14 @@ class _ActiveDownloadsCard extends StatelessWidget {
     required this.entries,
     required this.progressValues,
     this.onCancel,
+    this.accentColor,
   });
 
   final String title;
   final List<MapEntry<String, DownloadProgressContext>> entries;
   final Map<String, double> progressValues;
   final Future<void> Function(String key)? onCancel;
+  final Color? accentColor;
 
   Future<bool> _confirmCancelDownload(
       BuildContext context, DownloadProgressContext contextData) async {
@@ -598,19 +634,33 @@ class _ActiveDownloadsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final accent = accentColor ?? scheme.primary;
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          colors: [
+            Color.alphaBlend(accent.withOpacity(0.14), scheme.surface),
+            Color.alphaBlend(accent.withOpacity(0.04), scheme.surfaceVariant),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: accent.withOpacity(0.18)),
+        boxShadow: [lightGlowingShadow(context)],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(18.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               title,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
             ...entries.map((entry) {
@@ -634,9 +684,7 @@ class _ActiveDownloadsCard extends StatelessWidget {
                   children: [
                     Text(
                       headline,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
+                      style: theme.textTheme.bodyMedium
                           ?.copyWith(fontWeight: FontWeight.w600),
                     ),
                     if (detail?.isNotEmpty == true)
@@ -646,10 +694,8 @@ class _ActiveDownloadsCard extends StatelessWidget {
                           detail!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: Theme.of(context).hintColor),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.hintColor),
                         ),
                       ),
                     const SizedBox(height: 6),
@@ -672,12 +718,11 @@ class _ActiveDownloadsCard extends StatelessWidget {
                               child: LinearProgressIndicator(
                                 minHeight: 6,
                                 value: progress,
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceVariant,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .primary,
+                                backgroundColor: Color.alphaBlend(
+                                  accent.withOpacity(0.08),
+                                  scheme.surfaceVariant,
+                                ),
+                                color: accent,
                               ),
                             ),
                           ),
@@ -687,9 +732,7 @@ class _ActiveDownloadsCard extends StatelessWidget {
                         const SizedBox(width: 12),
                         Text(
                           percentLabel,
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelSmall
+                          style: theme.textTheme.labelSmall
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ],
@@ -710,48 +753,106 @@ class _EpisodeGroupTile extends StatelessWidget {
     required this.group,
     required this.onDelete,
     this.onOpen,
+    required this.accentColor,
   });
 
   final _EpisodeDownloadGroup group;
   final Future<void> Function(DownloadedEpisode) onDelete;
   final void Function(DownloadedEpisode)? onOpen;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: EdgeInsets.zero,
-      title: Text(group.mediaTitle,
-          style: Theme.of(context).textTheme.bodyLarge),
-      subtitle: Text(
-        '${group.entries.length} episode${group.entries.length == 1 ? '' : 's'} · ${_formatBytes(group.totalSizeBytes)}',
-        style: Theme.of(context)
-            .textTheme
-            .bodySmall
-            ?.copyWith(color: Theme.of(context).hintColor),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final containerColor =
+        Color.alphaBlend(accentColor.withOpacity(0.08), scheme.surfaceVariant);
+    final entryColor =
+        Color.alphaBlend(accentColor.withOpacity(0.04), scheme.surface);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: containerColor,
+        border: Border.all(color: accentColor.withOpacity(0.15)),
       ),
-      children: group.entries.map((entry) {
-        return ListTile(
-          contentPadding: EdgeInsets.zero,
-          onTap: onOpen == null ? null : () => onOpen!(entry),
-          title: Text('Episode ${entry.episodeNumber}'),
-          subtitle: entry.title?.isNotEmpty == true
-              ? Text(entry.title!, maxLines: 1, overflow: TextOverflow.ellipsis)
-              : null,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(_formatBytes(entry.sizeBytes),
-                  style: Theme.of(context).textTheme.bodySmall),
-              IconButton(
-                tooltip: 'Delete download',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => onDelete(entry),
-              ),
-            ],
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: ValueKey('${group.mediaId}-${group.mediaTitle}-${group.entries.length}'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          childrenPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          initiallyExpanded: false,
+          maintainState: false,
+          iconColor: accentColor,
+          collapsedIconColor: accentColor,
+          title: Text(
+            group.mediaTitle,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        );
-      }).toList(),
+          subtitle: Text(
+            '${group.entries.length} episode${group.entries.length == 1 ? '' : 's'} · ${_formatBytes(group.totalSizeBytes)}',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          children: group.entries.map((entry) {
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: entryColor,
+                border: Border.all(color: accentColor.withOpacity(0.12)),
+              ),
+              child: ListTile(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 4),
+                onTap: onOpen == null ? null : () => onOpen!(entry),
+                title: Text(
+                  'Episode ${entry.episodeNumber}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                subtitle: entry.title?.isNotEmpty == true
+                    ? Text(
+                        entry.title!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      )
+                    : null,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatBytes(entry.sizeBytes),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete download',
+                      icon: Icon(Icons.delete_outline,
+                          color: scheme.error.withOpacity(0.9)),
+                      onPressed: () => onDelete(entry),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
     );
   }
 }
@@ -761,48 +862,106 @@ class _ChapterGroupTile extends StatelessWidget {
     required this.group,
     required this.onDelete,
     this.onOpen,
+    required this.accentColor,
   });
 
   final _ChapterDownloadGroup group;
   final Future<void> Function(DownloadedChapter) onDelete;
   final void Function(DownloadedChapter)? onOpen;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: EdgeInsets.zero,
-      title: Text(group.mediaTitle,
-          style: Theme.of(context).textTheme.bodyLarge),
-      subtitle: Text(
-        '${group.entries.length} chapter${group.entries.length == 1 ? '' : 's'} · ${_formatBytes(group.totalSizeBytes)}',
-        style: Theme.of(context)
-            .textTheme
-            .bodySmall
-            ?.copyWith(color: Theme.of(context).hintColor),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final containerColor =
+        Color.alphaBlend(accentColor.withOpacity(0.08), scheme.surfaceVariant);
+    final entryColor =
+        Color.alphaBlend(accentColor.withOpacity(0.04), scheme.surface);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: containerColor,
+        border: Border.all(color: accentColor.withOpacity(0.15)),
       ),
-      children: group.entries.map((entry) {
-        return ListTile(
-          contentPadding: EdgeInsets.zero,
-          onTap: onOpen == null ? null : () => onOpen!(entry),
-          title: Text('Chapter ${entry.chapterNumber.toStringAsFixed(0)}'),
-          subtitle: entry.title?.isNotEmpty == true
-              ? Text(entry.title!, maxLines: 1, overflow: TextOverflow.ellipsis)
-              : null,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(_formatBytes(entry.sizeBytes),
-                  style: Theme.of(context).textTheme.bodySmall),
-              IconButton(
-                tooltip: 'Delete download',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => onDelete(entry),
-              ),
-            ],
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: ValueKey('${group.mediaId}-${group.mediaTitle}-${group.entries.length}'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          childrenPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          initiallyExpanded: false,
+          maintainState: false,
+          iconColor: accentColor,
+          collapsedIconColor: accentColor,
+          title: Text(
+            group.mediaTitle,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        );
-      }).toList(),
+          subtitle: Text(
+            '${group.entries.length} chapter${group.entries.length == 1 ? '' : 's'} · ${_formatBytes(group.totalSizeBytes)}',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          children: group.entries.map((entry) {
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: entryColor,
+                border: Border.all(color: accentColor.withOpacity(0.12)),
+              ),
+              child: ListTile(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 4),
+                onTap: onOpen == null ? null : () => onOpen!(entry),
+                title: Text(
+                  'Chapter ${entry.chapterNumber.toStringAsFixed(0)}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                subtitle: entry.title?.isNotEmpty == true
+                    ? Text(
+                        entry.title!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      )
+                    : null,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatBytes(entry.sizeBytes),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete download',
+                      icon: Icon(Icons.delete_outline,
+                          color: scheme.error.withOpacity(0.9)),
+                      onPressed: () => onDelete(entry),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
     );
   }
 }

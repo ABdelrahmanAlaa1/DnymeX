@@ -12,7 +12,7 @@ class HoldToCancelDetector extends StatefulWidget {
     this.overlayRadius,
     this.enabled = true,
     this.progressColor,
-    this.movementTolerance = 25,
+    this.movementTolerance = 35,
   });
 
   final Widget child;
