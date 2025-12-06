@@ -471,13 +471,13 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           colors: [
-            Color.alphaBlend(accent.withOpacity(0.18), scheme.surface),
-            Color.alphaBlend(accent.withOpacity(0.05), scheme.surfaceVariant),
+            Color.alphaBlend(accent.withOpacity(0.28), scheme.surface),
+            Color.alphaBlend(accent.withOpacity(0.1), scheme.surfaceVariant),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: accent.withOpacity(0.2)),
+        border: Border.all(color: accent.withOpacity(0.35)),
         boxShadow: [lightGlowingShadow(context)],
       ),
       child: Padding(
@@ -495,11 +495,21 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Color.alphaBlend(
-                            accent.withOpacity(0.22),
-                            scheme.surface,
-                          ),
                           borderRadius: BorderRadius.circular(12),
+                          gradient: LinearGradient(
+                            colors: [
+                              Color.alphaBlend(
+                                accent.withOpacity(0.38),
+                                scheme.surface,
+                              ),
+                              Color.alphaBlend(
+                                accent.withOpacity(0.16),
+                                scheme.surfaceVariant,
+                              ),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
                         ),
                         child: Text(
                           title,
@@ -512,7 +522,7 @@ class _DownloadsSummaryCard<T> extends StatelessWidget {
                       Text(
                         _summaryLabel,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
+                          color: scheme.onSurface.withOpacity(0.75),
                         ),
                       ),
                     ],
@@ -765,17 +775,36 @@ class _EpisodeGroupTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final containerColor =
-        Color.alphaBlend(accentColor.withOpacity(0.08), scheme.surfaceVariant);
-    final entryColor =
-        Color.alphaBlend(accentColor.withOpacity(0.04), scheme.surface);
+    final containerGradient = LinearGradient(
+      colors: [
+        Color.alphaBlend(accentColor.withOpacity(0.22), scheme.surface),
+        Color.alphaBlend(accentColor.withOpacity(0.06), scheme.surfaceVariant),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+    final entryGradient = LinearGradient(
+      colors: [
+        Color.alphaBlend(accentColor.withOpacity(0.18), scheme.surface),
+        Color.alphaBlend(accentColor.withOpacity(0.08), scheme.surfaceVariant),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: containerColor,
-        border: Border.all(color: accentColor.withOpacity(0.15)),
+        gradient: containerGradient,
+        border: Border.all(color: accentColor.withOpacity(0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withOpacity(0.18),
+            blurRadius: 26,
+            offset: const Offset(0, 14),
+          ),
+        ],
       ),
       child: Theme(
         data: theme.copyWith(dividerColor: Colors.transparent),
@@ -804,8 +833,15 @@ class _EpisodeGroupTile extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
-                color: entryColor,
-                border: Border.all(color: accentColor.withOpacity(0.12)),
+                gradient: entryGradient,
+                border: Border.all(color: accentColor.withOpacity(0.2)),
+                boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withOpacity(0.14),
+                    blurRadius: 18,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
               child: ListTile(
                 shape: RoundedRectangleBorder(
@@ -874,17 +910,36 @@ class _ChapterGroupTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final containerColor =
-        Color.alphaBlend(accentColor.withOpacity(0.08), scheme.surfaceVariant);
-    final entryColor =
-        Color.alphaBlend(accentColor.withOpacity(0.04), scheme.surface);
+    final containerGradient = LinearGradient(
+      colors: [
+        Color.alphaBlend(accentColor.withOpacity(0.22), scheme.surface),
+        Color.alphaBlend(accentColor.withOpacity(0.06), scheme.surfaceVariant),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+    final entryGradient = LinearGradient(
+      colors: [
+        Color.alphaBlend(accentColor.withOpacity(0.18), scheme.surface),
+        Color.alphaBlend(accentColor.withOpacity(0.08), scheme.surfaceVariant),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: containerColor,
-        border: Border.all(color: accentColor.withOpacity(0.15)),
+        gradient: containerGradient,
+        border: Border.all(color: accentColor.withOpacity(0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withOpacity(0.18),
+            blurRadius: 26,
+            offset: const Offset(0, 14),
+          ),
+        ],
       ),
       child: Theme(
         data: theme.copyWith(dividerColor: Colors.transparent),
@@ -913,8 +968,15 @@ class _ChapterGroupTile extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
-                color: entryColor,
-                border: Border.all(color: accentColor.withOpacity(0.12)),
+                gradient: entryGradient,
+                border: Border.all(color: accentColor.withOpacity(0.2)),
+                boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withOpacity(0.14),
+                    blurRadius: 18,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
               child: ListTile(
                 shape: RoundedRectangleBorder(

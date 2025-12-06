@@ -18,13 +18,18 @@ class ChapterRanges extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    Color _chipColor(bool selected) => Color.alphaBlend(
-          scheme.primary.withOpacity(selected ? 0.18 : 0.06),
-          scheme.surfaceVariant,
-        );
+    final Color selectedBackground =
+      Color.lerp(scheme.primaryContainer, scheme.surface, 0.2)!;
+    final Color unselectedBackground =
+      Color.lerp(scheme.surfaceVariant, scheme.surface, 0.65)!;
+    Color _chipColor(bool selected) =>
+      selected ? selectedBackground : unselectedBackground;
     Color _borderColor(bool selected) => selected
-        ? scheme.primary.withOpacity(0.55)
-        : scheme.outline.withOpacity(0.4);
+      ? scheme.primary.withOpacity(0.85)
+      : scheme.outline.withOpacity(0.35);
+    Color _labelColor(bool selected) => selected
+      ? scheme.onPrimaryContainer
+      : scheme.onSurfaceVariant.withOpacity(0.85);
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -54,7 +59,10 @@ class ChapterRanges extends StatelessWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
                     color: _chipColor(isSelected),
-                    border: Border.all(color: _borderColor(isSelected)),
+                    border: Border.all(
+                      color: _borderColor(isSelected),
+                      width: isSelected ? 1.6 : 1,
+                    ),
                     boxShadow:
                       isSelected ? [lightGlowingShadow(context)] : const [],
                   ),
@@ -62,9 +70,7 @@ class ChapterRanges extends StatelessWidget {
                     label,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: isSelected
-                              ? scheme.onPrimaryContainer
-                              : scheme.onSurfaceVariant,
+                          color: _labelColor(isSelected),
                         ),
                   ),
                 ),
