@@ -488,6 +488,7 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }
