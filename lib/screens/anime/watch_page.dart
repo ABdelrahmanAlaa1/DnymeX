@@ -99,6 +99,8 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
   final RxString resizeMode = "Cover".obs;
   late PlayerSettings playerSettings;
   late FocusNode _keyboardListenerFocusNode;
+  bool _globalHardwareKeyHandlerRegistered = false;
+  bool _isPlayerInitialized = false;
   aniskip.EpisodeSkipTimes? skipTimes;
   final isOPSkippedOnce = false.obs;
   final isEDSkippedOnce = false.obs;
@@ -187,6 +189,7 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
       canRequestFocus: !settings.isTV.value,
       skipTraversal: settings.isTV.value,
     );
+    _registerGlobalHardwareHandler();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_keyboardListenerFocusNode.hasFocus) {
         _keyboardListenerFocusNode.requestFocus();
@@ -204,6 +207,34 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
         SystemChrome.setPreferredOrientations([orientation]);
       }
     }
+  }
+
+  void _registerGlobalHardwareHandler() {
+    if (_globalHardwareKeyHandlerRegistered) return;
+    HardwareKeyboard.instance.addHandler(_handleGlobalHardwareKeyEvent);
+    _globalHardwareKeyHandlerRegistered = true;
+  }
+
+  void _unregisterGlobalHardwareHandler() {
+    if (!_globalHardwareKeyHandlerRegistered) return;
+    HardwareKeyboard.instance.removeHandler(_handleGlobalHardwareKeyEvent);
+    _globalHardwareKeyHandlerRegistered = false;
+  }
+
+  bool _handleGlobalHardwareKeyEvent(KeyEvent event) {
+    if (!_shouldHandleGlobalHotkeys(event)) {
+      return false;
+    }
+    handlePlayerKeyEvent(event);
+    return false;
+  }
+
+  bool _shouldHandleGlobalHotkeys(KeyEvent event) {
+    if (!mounted || !_isPlayerInitialized) return false;
+    if (settings.isTV.value) return false;
+    if (event is! KeyDownEvent) return false;
+    if (_keyboardListenerFocusNode.hasFocus) return false;
+    return true;
   }
 
   Future<DeviceOrientation> _getClosestLandscapeOrientation() async {
@@ -295,6 +326,7 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
         httpHeaders: episode.value.headers ??
             {'Referer': sourceController.activeSource.value?.baseUrl ?? ''},
         start: Duration(milliseconds: startTimeMilliseconds)));
+    _isPlayerInitialized = true;
     _initSubs();
     player.setRate(prevRate.value);
     isOPSkippedOnce.value = false;
@@ -719,6 +751,8 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
         currentPosition.value, episodeDuration.value, currentEpisode.value,
         updateAL: false);
 
+    _unregisterGlobalHardwareHandler();
+
     player.dispose();
     _leftAnimationController.dispose();
     _rightAnimationController.dispose();
@@ -847,6 +881,8 @@ class _WatchPageState extends State<WatchPage> with TickerProviderStateMixin {
       return;
     }
 
+    Logger.i(
+        'Applying shader preset from hotkey -> index $shaderIndex (key: ${key.debugName ?? key.keyLabel})');
     setShaders(shaderIndex);
   }
 
