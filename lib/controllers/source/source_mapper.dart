@@ -10,9 +10,15 @@ import 'package:get/get.dart';
 
 const Duration _sourceSearchTimeout = Duration(seconds: 6);
 
-class _SourceSearchTimeout implements Exception {
-  const _SourceSearchTimeout(this.source);
+class _SourceSearchFailure implements Exception {
+  const _SourceSearchFailure(this.source, this.reason);
   final Source source;
+  final String reason;
+}
+
+class _SourceSearchTimeout extends _SourceSearchFailure {
+  const _SourceSearchTimeout(Source source)
+      : super(source, 'timeout');
 }
 
 String _normalizeLight(String title) {
@@ -107,6 +113,7 @@ Future<Media?> mapMedia(
     Future<void> search(
         String query, String sourceTitle, bool isHeavyNormalized) async {
       searchedTitle.value = "Fetching results...";
+      final stopwatch = Stopwatch()..start();
       List<DMedia> results;
       try {
         final response = await activeSource.methods
@@ -115,9 +122,21 @@ Future<Media?> mapMedia(
         results = response.list;
       } on TimeoutException {
         throw _SourceSearchTimeout(activeSource);
+      } catch (error, stackTrace) {
+        Logger.i(
+            'Source search failed (${activeSource.name ?? 'Unknown'}): $error');
+        Logger.i(stackTrace.toString());
+        throw _SourceSearchFailure(activeSource, error.toString());
+      } finally {
+        stopwatch.stop();
       }
 
-      if (results.isEmpty) return;
+      if (results.isEmpty) {
+        if (stopwatch.elapsed >= _sourceSearchTimeout) {
+          throw _SourceSearchTimeout(activeSource);
+        }
+        return;
+      }
 
       fallbackResults = results;
       final sourceSeason = _extractSeasonNumber(sourceTitle);
@@ -215,16 +234,19 @@ Future<Media?> mapMedia(
       print("No good match. Best: ${bestScore.toStringAsFixed(3)}");
       lastFallbackResults = fallbackResults;
       break;
-    } on _SourceSearchTimeout catch (timeout) {
+    } on _SourceSearchFailure catch (failure) {
       final nextSource =
           sourceController.cycleToNextSource(type, recordUsage: false);
       if (nextSource == null) {
         searchedTitle.value =
-            'Source timeout (${timeout.source.name ?? 'Unknown'}).';
+            'Source issue (${failure.source.name ?? 'Unknown'}).';
         return null;
       }
+      final issueLabel = failure is _SourceSearchTimeout
+          ? 'timeout'
+          : 'error';
       searchedTitle.value =
-          'Source timeout (${timeout.source.name ?? 'Unknown'}). '
+          'Source $issueLabel (${failure.source.name ?? 'Unknown'}). '
           'Trying ${nextSource.name ?? 'next source'}…';
       continue;
     }
