@@ -124,6 +124,24 @@ class _SettingsExtensionsState extends State<SettingsExtensions> {
                             ],
                           )),
                   ],
+                ),
+                const SizedBox(height: 24),
+                CustomSliderTile(
+                  icon: HugeIcons.strokeRoundedAlignLeft,
+                  title: 'Repo field line cap',
+                  description:
+                      'Choose how many lines show before repo links scroll',
+                  sliderValue: settings.repoLinkLineLimit.toDouble(),
+                  min: 2,
+                  max: 5,
+                  divisions: 3,
+                  label: '${settings.repoLinkLineLimit} lines',
+                  onChanged: (value) {
+                    final clamped = value.round().clamp(2, 5);
+                    setState(() {
+                      settings.repoLinkLineLimit = clamped;
+                    });
+                  },
                 )
               ],
             ),

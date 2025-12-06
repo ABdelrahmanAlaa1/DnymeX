@@ -1,4 +1,6 @@
+import 'package:anymex/controllers/settings/settings.dart';
 import 'package:anymex/controllers/source/source_controller.dart';
+import 'package:anymex/widgets/common/glow.dart';
 import 'package:dartotsu_extension_bridge/ExtensionManager.dart';
 import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +33,7 @@ class GitHubRepoDialog extends StatefulWidget {
 class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final ScrollController _textScrollController = ScrollController();
   String? _errorMessage;
   bool _isLoading = false;
 
@@ -50,7 +53,39 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
   void dispose() {
     _controller.dispose();
     _focusNode.dispose();
+    _textScrollController.dispose();
     super.dispose();
+  }
+
+  int get _lineLimit {
+    final value = settingsController.repoLinkLineLimit;
+    return value.clamp(2, 5).toInt();
+  }
+
+  double _lineHeight(TextStyle style) {
+    final fontSize = style.fontSize ?? 14;
+    final height = style.height ?? 1.3;
+    return fontSize * height;
+  }
+
+  int _estimateVisualLines(
+    String text,
+    double maxWidth,
+    TextStyle style,
+    TextDirection direction,
+  ) {
+    if (maxWidth.isNaN || maxWidth <= 0) {
+      return text.isEmpty ? 1 : text.split('\n').length;
+    }
+    final displayText = text.isEmpty ? ' ' : text;
+    final painter = TextPainter(
+      text: TextSpan(text: displayText, style: style),
+      textDirection: direction,
+      maxLines: null,
+    );
+    painter.layout(maxWidth: maxWidth);
+    final metrics = painter.computeLineMetrics();
+    return metrics.isEmpty ? 1 : metrics.length;
   }
 
   List<String> _parseEntries(String raw) {
@@ -119,24 +154,30 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final accent = colorScheme.primary;
 
     return Dialog(
       backgroundColor: Colors.transparent,
       elevation: 0,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 420),
+        constraints: const BoxConstraints(maxWidth: 440),
         decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: colorScheme.shadow.withOpacity(0.15),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(24),
+          gradient: LinearGradient(
+            colors: [
+              Color.alphaBlend(accent.withOpacity(0.12), colorScheme.surface),
+              Color.alphaBlend(
+                  accent.withOpacity(0.04), colorScheme.surfaceVariant),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(color: accent.withOpacity(0.2)),
+          boxShadow: [lightGlowingShadow(context)],
         ),
-        child: Column(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -144,10 +185,20 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
             Container(
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
               decoration: BoxDecoration(
-                color: colorScheme.surfaceContainer.withOpacity(0.3),
+                gradient: LinearGradient(
+                  colors: [
+                    Color.alphaBlend(
+                        accent.withOpacity(0.16),
+                        colorScheme.surfaceContainerHighest),
+                    Color.alphaBlend(
+                        accent.withOpacity(0.04), colorScheme.surface),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
                 ),
               ),
               child: Row(
@@ -204,62 +255,152 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: _errorMessage != null
-                            ? colorScheme.error
-                            : colorScheme.outline.withOpacity(0.3),
-                        width: 1,
-                      ),
-                      color: colorScheme.surfaceContainerLowest,
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: TextField(
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final textStyle = theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                            height: 1.32,
+                          ) ??
+                          TextStyle(
+                            fontSize: 14,
+                            height: 1.32,
+                            color: colorScheme.onSurface,
+                          );
+                      final contentPadding = const EdgeInsets.fromLTRB(16, 18, 16, 34);
+                      final double paddingWidth =
+                          contentPadding.horizontal + 38; // prefix width
+                      final double availableWidth =
+                          (constraints.maxWidth - paddingWidth).clamp(120.0, constraints.maxWidth);
+                      final int measuredLines = _estimateVisualLines(
+                        _controller.text,
+                        availableWidth,
+                        textStyle,
+                        Directionality.of(context),
+                      );
+                      final int limit = _lineLimit;
+                      final bool needsScroll = measuredLines >= limit;
+                      final int displayLines = limit + 1;
+                      final double lineHeight = _lineHeight(textStyle);
+                      final double fieldHeight =
+                          (lineHeight * displayLines) + contentPadding.vertical;
+                      final ScrollPhysics physics = needsScroll
+                          ? const BouncingScrollPhysics()
+                          : const NeverScrollableScrollPhysics();
+
+                      Widget textField = TextField(
                         controller: _controller,
                         focusNode: _focusNode,
-                        minLines: 4,
+                        scrollController: _textScrollController,
+                        scrollPhysics: physics,
+                        minLines: displayLines,
                         maxLines: null,
                         keyboardType: TextInputType.multiline,
                         textInputAction: TextInputAction.newline,
                         textAlignVertical: TextAlignVertical.top,
                         decoration: InputDecoration(
-                            hintText: 'https://github.com/username/repo.json',
-                            hintStyle: TextStyle(
-                              color:
-                                  colorScheme.onSurfaceVariant.withOpacity(0.6),
-                              fontSize: 14,
-                            ),
-                            prefixIcon: Icon(
-                              HugeIcons.strokeRoundedLink01,
-                              color: colorScheme.onSurfaceVariant,
-                              size: 18,
-                            ),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            errorBorder: InputBorder.none,
-                            focusedErrorBorder: InputBorder.none,
-                            disabledBorder: InputBorder.none),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurface,
+                          hintText: 'https://github.com/username/repo.json',
+                          hintStyle: TextStyle(
+                            color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                            fontSize: 14,
+                          ),
+                          prefixIcon: Icon(
+                            HugeIcons.strokeRoundedLink01,
+                            color: colorScheme.onSurfaceVariant,
+                            size: 18,
+                          ),
+                          border: InputBorder.none,
+                          contentPadding: contentPadding,
                         ),
+                        style: textStyle.copyWith(color: colorScheme.onSurface),
                         onSubmitted: (_) => _handleSubmit(),
                         onChanged: (value) {
-                          if (_errorMessage != null) {
-                            setState(() {
-                              _errorMessage = null;
-                            });
-                          }
+                          setState(() {
+                            _errorMessage = null;
+                          });
                         },
-                      ),
-                    ),
+                      );
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          gradient: LinearGradient(
+                            colors: [
+                              Color.alphaBlend(
+                                  accent.withOpacity(0.18),
+                                  colorScheme.surfaceContainerLow),
+                              Color.alphaBlend(
+                                  accent.withOpacity(0.05),
+                                  colorScheme.surfaceVariant),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          border: Border.all(
+                            color: (_errorMessage != null
+                                    ? colorScheme.error
+                                    : accent)
+                                .withOpacity(_errorMessage != null ? 0.7 : 0.3),
+                          ),
+                          boxShadow: [
+                            if (_errorMessage != null)
+                              BoxShadow(
+                                color: colorScheme.error.withOpacity(0.3),
+                                blurRadius: 18,
+                                offset: const Offset(0, 8),
+                              )
+                            else
+                              lightGlowingShadow(context),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Stack(
+                            children: [
+                              SizedBox(
+                                height: fieldHeight,
+                                child: Scrollbar(
+                                  controller: _textScrollController,
+                                  thumbVisibility: needsScroll,
+                                  trackVisibility: needsScroll,
+                                  child: textField,
+                                ),
+                              ),
+                              Positioned(
+                                bottom: 8,
+                                left: 16,
+                                right: 16,
+                                child: IgnorePointer(
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Container(
+                                          height: 1.2,
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              colors: [
+                                                colorScheme.onSurfaceVariant
+                                                    .withOpacity(0.05),
+                                                accent.withOpacity(0.2),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Icon(
+                                        Icons.add_rounded,
+                                        size: 16,
+                                        color: accent.withOpacity(0.45),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   if (_errorMessage != null) ...[
                     const SizedBox(height: 8),

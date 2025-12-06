@@ -132,6 +132,14 @@ class Settings extends GetxController {
   set disableGradient(bool value) =>
       _setUISetting((s) => s?.disableGradient = value);
 
+    int get repoLinkLineLimit =>
+            preferences.get('repo_link_line_limit', defaultValue: 3);
+    set repoLinkLineLimit(int value) {
+        final clamped = value.clamp(2, 5).toInt();
+        preferences.put('repo_link_line_limit', clamped);
+        update();
+    }
+
   Map<String, bool> get homePageCards => _getUISetting((s) => s.homePageCards);
   Map<String, bool> get homePageCardsMal =>
       _getUISetting((s) => s.homePageCardsMal);
